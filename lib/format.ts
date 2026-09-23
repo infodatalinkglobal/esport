@@ -6,9 +6,10 @@
  * always produce exactly the same string (no hydration mismatches, no "yesterday"
  * off-by-one for players near midnight).
  *
- * Module 2 and Module 3 will add their own helpers here (match status badges,
- * for example); Module 1 only needs the ones below.
+ * Module 2 adds the match-status helpers at the bottom of this file.
  */
+
+import type { MatchStatus } from '@/types';
 
 /** Timezone used for every date the players see. */
 const GHANA_TIMEZONE = 'Africa/Accra';
@@ -123,4 +124,59 @@ export function siteUrl(): string {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
 
   return 'http://localhost:3000';
+}
+
+/* ==========================================================================
+ * MODULE 2 — match status display helpers
+ * ========================================================================== */
+
+/**
+ * A short, friendly label for a match status, used in the status badges.
+ *
+ * @param status 'pending' | 'completed' | 'disputed'
+ * @returns e.g. 'Pending', 'Completed', 'Disputed'.
+ */
+export function matchStatusLabel(status: MatchStatus): string {
+  switch (status) {
+    case 'completed':
+      return 'Completed';
+    case 'disputed':
+      return 'Disputed';
+    default:
+      return 'Pending';
+  }
+}
+
+/**
+ * The emoji that goes in front of a match status, as used in the brief.
+ *
+ * @param status 'pending' | 'completed' | 'disputed'
+ * @returns 🟡 for pending, ✅ for completed, 🔴 for disputed.
+ */
+export function matchStatusEmoji(status: MatchStatus): string {
+  switch (status) {
+    case 'completed':
+      return '✅';
+    case 'disputed':
+      return '🔴';
+    default:
+      return '🟡';
+  }
+}
+
+/**
+ * Tailwind classes for a match-status badge.
+ *
+ * @param status 'pending' | 'completed' | 'disputed'
+ * @returns Class names for the badge element.
+ */
+export function matchStatusClasses(status: MatchStatus): string {
+  switch (status) {
+    case 'completed':
+      return 'bg-pitch-500/15 text-pitch-400 border-pitch-500/40';
+    case 'disputed':
+      return 'bg-red-500/15 text-red-300 border-red-500/40';
+    default:
+      return 'bg-white/10 text-white/70 border-white/20';
+  }
 }

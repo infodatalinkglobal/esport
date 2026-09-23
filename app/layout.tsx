@@ -64,13 +64,21 @@ export default function RootLayout({
               DLS <span className="ml-1 text-pitch-400">Tournament GH</span>
             </Link>
 
-            {/* The hero section is the only navigation target in Module 1. */}
-            <a
-              href="#register"
-              className="flex min-h-tap items-center rounded-lg px-3 text-sm font-medium text-slate-300 active:bg-white/5"
-            >
-              Register
-            </a>
+            <nav aria-label="Main navigation">
+              <ul className="flex items-center">
+                {/* Module 2 added the result-submission page. The group
+                    standings need a tournament id, so they are linked from the
+                    landing page and the success page instead of the nav. */}
+                <li>
+                  <Link
+                    href="/submit-result"
+                    className="flex min-h-tap items-center rounded-lg px-3 text-sm font-medium text-slate-300 active:bg-white/5"
+                  >
+                    Submit Result
+                  </Link>
+                </li>
+              </ul>
+            </nav>
           </div>
         </header>
 

@@ -1,18 +1,23 @@
 /**
- * Input validation for the registration form.
+ * Input validation for the public forms.
  *
  * The browser checks these same rules for instant feedback, and the server
  * checks them again — a player with a modified page must never be able to store
  * junk in the database.
  *
- * Module 2 and Module 3 will add `validateSubmitResult()` for the result form.
+ * MODULE 1: `validateRegistration()` (the registration form).
+ * MODULE 2: `validateGroupResult()` (the result-submission form).
+ * MODULE 3 will add the knockout branch to the result validation.
  */
 
-import type { RegisterPayload } from '@/types';
+import type { RegisterPayload, SubmitGroupResultPayload } from '@/types';
 import { isValidGhanaPhone, normalizePhone } from './format';
 
 /** Longest sensible length for a name or team name, in characters. */
 const MAX_TEXT_LENGTH = 60;
+
+/** Highest score that can be entered for a match (guards typos like 300). */
+const MAX_SCORE = 99;
 
 /**
  * Result of a validation pass.
@@ -30,6 +35,19 @@ export type ValidationResult<T> =
  */
 function clean(value: unknown): string {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+}
+
+/**
+ * Converts an unknown value into a valid match score.
+ *
+ * @param value The raw score (number or numeric string).
+ * @returns The score as an integer 0-99, or null when it is not valid.
+ */
+function toScore(value: unknown): number | null {
+  const number = typeof value === 'number' ? value : Number(value);
+
+  if (!Number.isInteger(number) || number < 0 || number > MAX_SCORE) return null;
+  return number;
 }
 
 /**
@@ -114,6 +132,68 @@ export function validateRegistration(
       dls_team_name: teamName,
       career_mode_confirmed: true,
       rules_accepted: true,
+    },
+  };
+}
+
+/**
+ * Validates a group-match result submission.
+ *
+ * Rules enforced:
+ * - a match id, a phone number and a screenshot URL are all required
+ * - the phone number is a valid Ghanaian mobile number
+ * - both scores are whole numbers between 0 and 99
+ *
+ * @param body The raw request body.
+ * @returns The cleaned payload, or an error message written for the player.
+ */
+export function validateGroupResult(
+  body: unknown,
+): ValidationResult<SubmitGroupResultPayload> {
+  if (!body || typeof body !== 'object') {
+    return { ok: false, error: 'Please fill in the result form.' };
+  }
+
+  const input = body as Partial<SubmitGroupResultPayload>;
+
+  const matchId = clean(input.match_id);
+  const phone = normalizePhone(clean(input.phone_number));
+  const screenshot = clean(input.screenshot_url);
+  const myScore = toScore(input.my_score);
+  const opponentScore = toScore(input.opponent_score);
+
+  if (!matchId) {
+    return { ok: false, error: 'Please choose the match you are reporting.' };
+  }
+  if (!isValidGhanaPhone(phone)) {
+    return {
+      ok: false,
+      error:
+        'Enter the WhatsApp number you registered with, in the format 024XXXXXXX or 05XXXXXXXX.',
+    };
+  }
+  if (myScore === null || opponentScore === null) {
+    return {
+      ok: false,
+      error: 'Enter both scores as whole numbers between 0 and 99.',
+    };
+  }
+  if (!screenshot) {
+    return {
+      ok: false,
+      error: 'Screenshot is required as proof of your result.',
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      kind: 'group',
+      match_id: matchId,
+      phone_number: phone,
+      my_score: myScore,
+      opponent_score: opponentScore,
+      screenshot_url: screenshot,
     },
   };
 }

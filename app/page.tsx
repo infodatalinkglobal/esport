@@ -13,6 +13,7 @@
  * phone while the JavaScript is still downloading.
  */
 
+import Link from 'next/link';
 import CountdownTimer from '@/components/CountdownTimer';
 import PrizeBreakdown from '@/components/PrizeBreakdown';
 import RegistrationForm from '@/components/RegistrationForm';
@@ -242,6 +243,23 @@ export default async function HomePage() {
           isFull={isFull}
           spotsLeft={spotsLeft}
         />
+      </section>
+
+      {/* ============ PLAYER LINKS (Module 2 pages) ====================== */}
+      <section aria-labelledby="links-heading" className="space-y-3">
+        <h2 id="links-heading" className="text-lg font-bold text-white">
+          Group Stage
+        </h2>
+        <Link href={`/groups/${tournament.id}`} className="btn-secondary">
+          View group standings &amp; fixtures
+        </Link>
+        <Link href={`/submit-result?tournament=${tournament.id}`} className="btn-secondary">
+          Submit a match result
+        </Link>
+        <p className="text-xs text-slate-500">
+          Standings update automatically after every confirmed result. Once
+          every group match is played, the organizer draws the knockout bracket.
+        </p>
       </section>
 
       {/* ========================= 5. RULES ============================== */}
