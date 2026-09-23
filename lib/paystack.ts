@@ -55,17 +55,19 @@ export interface PaystackVerifyData {
 /**
  * Builds the placeholder email Paystack requires.
  *
- * The platform deliberately has no accounts (no login is in the MVP), but
- * Paystack checkout insists on an email address, so we derive a deterministic
- * one from the player's phone number. Nobody is emailed: the receipt is shown
- * on screen and the MoMo confirmation SMS comes from the network.
+ * The platform has no logins, but Paystack insists on an email address, so we
+ * derive a deterministic one from the player's phone number. Nobody is emailed.
+ *
+ * The address must look like a normal public one: Paystack rejects reserved
+ * TLDs (.local, .test, .invalid) and an all-digits address, both with
+ * "Invalid Email Address Passed", which blocks every payment.
  *
  * @param phoneNumber Player's WhatsApp number.
- * @returns An address such as `0241234567@players.  return `${digits}@players.dlstournament.com`;`.
+ * @returns An address such as `player0241234567@players.dlstournament.com`.
  */
 export function buildPlayerEmail(phoneNumber: string): string {
   const digits = phoneNumber.replace(/\D/g, '');
-  return `${digits}@players.  return `${digits}@players.dlstournament.com`;`;
+  return 'player' + digits + '@players.dlstournament.com';
 }
 
 /**
