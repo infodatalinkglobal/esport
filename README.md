@@ -217,6 +217,35 @@ draw). Then re-save the standings by re-submitting through the app or editing
 
 ---
 
+## 🩺 Troubleshooting
+
+**The page shows plain unstyled HTML (no colours, no layout).**
+`next dev` and `next build` write into the same output folder by default, so
+running a production build while the dev server is serving a preview deletes the
+dev server's JavaScript and CSS — the browser then gets `404` for every asset and
+renders raw HTML. Fix it by stopping the dev server, deleting the build folder
+and starting again:
+
+```bash
+rm -rf .next
+npm run dev
+```
+
+To verify a production build *without* disturbing a running dev server, send it
+to its own folder (already configured in `next.config.mjs`):
+
+```bash
+NEXT_DIST_DIR=.next-build npm run build
+```
+
+**The landing page says "Setup needed".**
+Supabase is not configured yet: paste `setup.sql` into the Supabase SQL editor,
+then copy `.env.example` to `.env.local` and fill in the keys, and restart the
+dev server.
+
+**"Groups not drawn yet"**
+Expected until you call `POST /api/admin/draw-groups` — see the admin section above.
+
 ## 🔒 Security notes
 
 - The service-role key is only ever used inside `app/api/**` and server

@@ -18,8 +18,9 @@ import CountdownTimer from '@/components/CountdownTimer';
 import PrizeBreakdown from '@/components/PrizeBreakdown';
 import RegistrationForm from '@/components/RegistrationForm';
 import { calculatePrizes, formatCedis } from '@/lib/calculations';
-import { formatDateTime, whatsappLink } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import { getActiveTournament, getRegistrationCounts } from '@/lib/data';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 /** Player counts and deadlines change constantly — never cache this page. */
 export const dynamic = 'force-dynamic';
@@ -96,7 +97,8 @@ export default async function HomePage() {
   const tournament = await getActiveTournament();
 
   // ------------------------------------------------------ no tournament yet
-  // Shown until setup.sql has been run (or when every tournament is finished).
+  // Shown when the environment is not set up yet, or when setup.sql has not
+  // created a tournament, or when every tournament is finished.
   if (!tournament) {
     return (
       <div className="space-y-6">
@@ -109,26 +111,43 @@ export default async function HomePage() {
           </p>
         </section>
 
-        <section className="card border-amber-500/40 bg-amber-500/10">
-          <h2 className="text-base font-semibold text-amber-200">
-            No tournament published yet
-          </h2>
-          <p className="mt-1 text-sm text-amber-100">
-            The next DLS tournament is being set up. Message the organizer on
-            WhatsApp and you will be the first to know when registration opens.
-          </p>
-          <a
-            href={whatsappLink(
-              undefined,
-              'Hi! Please tell me when the next DLS tournament opens.',
-            )}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-primary mt-3"
-          >
-            Contact organizer on WhatsApp
-          </a>
-        </section>
+        {/* Setup notice: only ever shown to the organizer, because it can only
+            appear while the environment variables are missing. It disappears by
+            itself as soon as .env.local is filled in and a tournament exists. */}
+        {!isSupabaseConfigured() ? (
+          <section className="card border-amber-500/40 bg-amber-500/10">
+            <h2 className="text-base font-semibold text-amber-200">
+              Setup needed — no database connected
+            </h2>
+            <ol className="mt-2 space-y-2 text-sm text-amber-100">
+              <li>
+                <strong>1.</strong> Paste <code>setup.sql</code> into Supabase →
+                SQL Editor → Run.
+              </li>
+              <li>
+                <strong>2.</strong> Copy <code>.env.example</code> to{' '}
+                <code>.env.local</code> and fill in your Supabase and Paystack
+                keys.
+              </li>
+              <li>
+                <strong>3.</strong> Restart the dev server and reload this page.
+              </li>
+            </ol>
+            <p className="mt-3 text-xs text-amber-200/80">
+              Full instructions are in README.md and .env.example.
+            </p>
+          </section>
+        ) : (
+          <section className="card border-amber-500/40 bg-amber-500/10">
+            <h2 className="text-base font-semibold text-amber-200">
+              No tournament published yet
+            </h2>
+            <p className="mt-1 text-sm text-amber-100">
+              The next DLS tournament is being set up. The organizer will post it
+              here soon — the WhatsApp link below is always open.
+            </p>
+          </section>
+        )}
       </div>
     );
   }
