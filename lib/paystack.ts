@@ -61,11 +61,11 @@ export interface PaystackVerifyData {
  * on screen and the MoMo confirmation SMS comes from the network.
  *
  * @param phoneNumber Player's WhatsApp number.
- * @returns An address such as `0241234567@players.dls.local`.
+ * @returns An address such as `0241234567@players.  return `${digits}@players.dlstournament.com`;`.
  */
 export function buildPlayerEmail(phoneNumber: string): string {
   const digits = phoneNumber.replace(/\D/g, '');
-  return `${digits}@players.dls.local`;
+  return `${digits}@players.  return `${digits}@players.dlstournament.com`;`;
 }
 
 /**
