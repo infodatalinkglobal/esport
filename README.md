@@ -32,6 +32,15 @@ This creates all 7 tables, the indexes, the Row Level Security policies, the
 `result-screenshots` storage bucket, and one starter tournament
 (GH₵10 entry, 8 players). It is safe to re-run.
 
+> **Already connected Supabase to GitHub?** The integration reads **only**
+> `supabase/migrations/` — it never looks at `setup.sql`. The identical schema is
+> committed at `supabase/migrations/20260923000000_initial_schema.sql`, so switch
+> on **Deploy to production** and merge this branch into your production branch
+> (`main`) and Supabase applies it for you. Either route works, both are safe to
+> run twice, and doing both is harmless. Leave **preview branching** off unless
+> you upgrade to Pro — preview branches spawn a database per pull request and are
+> billed hourly.
+
 ### 2. Create the Paystack keys
 
 1. Sign up free at [paystack.com](https://paystack.com)
@@ -322,7 +331,8 @@ still points at `localhost`, payments will not return to your confirmation page.
 
 ### 4. Supabase checks
 
-- [ ] `setup.sql` has been run (all 7 tables exist)
+- [ ] The schema has been applied — either `setup.sql` pasted into the SQL
+      Editor, or the migration deployed by the GitHub integration (all 7 tables exist)
 - [ ] Row Level Security is enabled on all 7 tables
 - [ ] The `result-screenshots` bucket exists (Storage → Buckets)
 - [ ] Switch Paystack to live keys when you are ready to take real money

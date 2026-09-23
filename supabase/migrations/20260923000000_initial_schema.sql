@@ -1,26 +1,35 @@
 -- =============================================================================
--- DLS TOURNAMENT PLATFORM — SETUP.SQL   (run once, before Module 1)
+-- DLS TOURNAMENT PLATFORM — INITIAL SCHEMA  (Supabase migration)
 -- =============================================================================
--- HOW TO RUN THIS
---   1. Open your project at https://supabase.com
---   2. Go to SQL Editor → New query
---   3. Paste this whole file and click RUN
+-- This file is the Supabase-migration twin of `setup.sql` in the repository
+-- root. The SQL below is identical — only this header differs.
 --
--- It is safe to run more than once: every statement either uses
--- "if not exists" or is dropped and recreated first.
+--   setup.sql                                        -> paste into the SQL Editor
+--   supabase/migrations/20260923000000_initial_schema.sql -> applied automatically
 --
--- NOTE: the same schema also ships as a Supabase migration at
---   supabase/migrations/20260923000000_initial_schema.sql
--- which the Supabase GitHub integration applies automatically. If you change
--- anything below, change that file too.
+-- WHY THIS FILE EXISTS
+--   Supabase's GitHub integration ("Deploy to production") reads ONLY this
+--   folder. Every commit to your production branch runs any migration it has
+--   not already applied, so schema changes reach the database without anyone
+--   copy-pasting SQL by hand.
+--
+-- SAFE TO RUN TWICE
+--   Both files are idempotent: tables use "if not exists", constraints swallow
+--   duplicate_object, policies are dropped before being recreated, the storage
+--   bucket uses "on conflict do nothing", and the starter tournament is only
+--   inserted when the table is empty. Applying this to a database where you
+--   already pasted setup.sql is a no-op, not an error.
+--
+-- ⚠️ KEEPING THEM IN SYNC
+--   If you change the schema, change BOTH files. The migration is what new
+--   environments get; setup.sql is what you hand to anyone setting up by hand.
 --
 -- What this file creates:
---   1. The 7 tables of the platform (tournaments + all Module 2 & 3 tables, so
---      the schema is complete before you start building)
+--   1. The 7 tables of the platform
 --   2. Indexes on the columns the app actually queries
---   3. Row Level Security (RLS) policies: the public may READ public data and
---      INSERT a registration, and may never update or delete anything
---   4. A public Storage bucket for match screenshots (used from Module 2)
+--   3. Row Level Security: public READ on public data, INSERT-only on
+--      registrations, and no public update or delete anywhere
+--   4. A public Storage bucket for match screenshots
 --   5. One starter tournament row (GH₵10 entry, 8 players max)
 -- =============================================================================
 
