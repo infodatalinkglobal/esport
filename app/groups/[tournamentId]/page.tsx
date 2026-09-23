@@ -133,6 +133,10 @@ export default async function GroupsPage({ params }: GroupsPageProps) {
           Submit a match result
         </Link>
 
+        <Link href={`/bracket/${tournament.id}`} className="btn-secondary">
+          View knockout bracket
+        </Link>
+
         <a
           href={whatsappLink(
             undefined,

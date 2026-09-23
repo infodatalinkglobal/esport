@@ -6,11 +6,15 @@
  * junk in the database.
  *
  * MODULE 1: `validateRegistration()` (the registration form).
- * MODULE 2: `validateGroupResult()` (the result-submission form).
- * MODULE 3 will add the knockout branch to the result validation.
+ * MODULE 2: `validateGroupResult()` (group results).
+ * MODULE 3: `validateKnockoutResult()` (knockout results).
  */
 
-import type { RegisterPayload, SubmitGroupResultPayload } from '@/types';
+import type {
+  RegisterPayload,
+  SubmitGroupResultPayload,
+  SubmitKnockoutResultPayload,
+} from '@/types';
 import { isValidGhanaPhone, normalizePhone } from './format';
 
 /** Longest sensible length for a name or team name, in characters. */
@@ -193,6 +197,62 @@ export function validateGroupResult(
       phone_number: phone,
       my_score: myScore,
       opponent_score: opponentScore,
+      screenshot_url: screenshot,
+    },
+  };
+}
+
+/**
+ * Validates a knockout-match result submission.
+ *
+ * Rules enforced:
+ * - a match id, a phone number and a screenshot URL are all required
+ * - the phone number is a valid Ghanaian mobile number
+ * - the player must say whether they won or lost (knockout matches never draw)
+ *
+ * @param body The raw request body.
+ * @returns The cleaned payload, or an error message written for the player.
+ */
+export function validateKnockoutResult(
+  body: unknown,
+): ValidationResult<SubmitKnockoutResultPayload> {
+  if (!body || typeof body !== 'object') {
+    return { ok: false, error: 'Please fill in the result form.' };
+  }
+
+  const input = body as Partial<SubmitKnockoutResultPayload>;
+
+  const matchId = clean(input.match_id);
+  const phone = normalizePhone(clean(input.phone_number));
+  const screenshot = clean(input.screenshot_url);
+
+  if (!matchId) {
+    return { ok: false, error: 'Please choose the match you are reporting.' };
+  }
+  if (!isValidGhanaPhone(phone)) {
+    return {
+      ok: false,
+      error:
+        'Enter the WhatsApp number you registered with, in the format 024XXXXXXX or 05XXXXXXXX.',
+    };
+  }
+  if (input.knockout_result !== 'won' && input.knockout_result !== 'lost') {
+    return { ok: false, error: 'Choose whether you won or lost the match.' };
+  }
+  if (!screenshot) {
+    return {
+      ok: false,
+      error: 'Screenshot is required as proof of your result.',
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      kind: 'knockout',
+      match_id: matchId,
+      phone_number: phone,
+      knockout_result: input.knockout_result,
       screenshot_url: screenshot,
     },
   };

@@ -1,11 +1,14 @@
 /**
- * Result submission page (/submit-result)   (MODULE 2)
+ * Result submission page (/submit-result)   (MODULES 2 and 3)
  *
  * The page loads the tournament's open fixtures on the server and hands them to
  * the form, so the browser never sees a phone number:
  *
  * - Group matches: fixtures still waiting for a result ('pending').
- * - Knockout matches: none yet — Module 3 fills this in.
+ * - Knockout matches: bracket matches that have both players and are pending.
+ *
+ * The tab that opens first follows the tournament status: Knockout once the
+ * bracket is drawn, otherwise Group.
  *
  * "Tournament ID (dropdown or URL param)": the tournament comes from the
  * `?tournament=<uuid>` link the organizer shares, and falls back to the active
@@ -18,10 +21,12 @@ import ResultSubmissionForm from '@/components/ResultSubmissionForm';
 import type { MatchOption } from '@/types';
 import {
   getActiveTournament,
+  getBracketMatches,
   getGroupMatches,
   getPlayerMap,
   getTournamentById,
 } from '@/lib/data';
+import { knockoutMatchLabel } from '@/lib/bracket';
 import { whatsappLink } from '@/lib/format';
 
 /** Match states change constantly — always render fresh. */
@@ -87,8 +92,9 @@ export default async function SubmitResultPage({
     );
   }
 
-  const [groupMatches, players] = await Promise.all([
+  const [groupMatches, bracketMatches, players] = await Promise.all([
     getGroupMatches(tournament.id),
+    getBracketMatches(tournament.id),
     getPlayerMap(tournament.id),
   ]);
 
@@ -102,6 +108,30 @@ export default async function SubmitResultPage({
         players[match.player_a_id]?.player_name ?? 'Player A'
       } vs ${players[match.player_b_id]?.player_name ?? 'Player B'}`,
     }));
+
+  // A knockout match can only be reported once both players are known, and only
+  // while it is still waiting for a result.
+  const totalRounds = bracketMatches.length
+    ? Math.max(...bracketMatches.map((match) => match.round))
+    : 1;
+
+  const knockoutOptions: MatchOption[] = bracketMatches
+    .filter(
+      (match) =>
+        match.status === 'pending' && match.player_a_id && match.player_b_id,
+    )
+    .map((match) => ({
+      id: match.id,
+      label: `${knockoutMatchLabel(match.round, match.match_number, totalRounds)}: ${
+        players[match.player_a_id as string]?.player_name ?? 'Player A'
+      } vs ${players[match.player_b_id as string]?.player_name ?? 'Player B'}`,
+    }));
+
+  // Knockout first once the bracket exists; group stage before that.
+  const defaultTab: 'group' | 'knockout' =
+    tournament.status === 'bracket_drawn' || tournament.status === 'completed'
+      ? 'knockout'
+      : 'group';
 
   return (
     <div className="space-y-5">
@@ -122,6 +152,10 @@ export default async function SubmitResultPage({
             appear on the final scoreboard. Draws are allowed in the group stage.
           </li>
           <li>
+            • Knockout matches never draw: say whether you won or lost — extra
+            time and penalties decide a level match.
+          </li>
+          <li>
             • Matching submissions confirm the result automatically; conflicting
             submissions mark the match DISPUTED for the organizer to review
             within 24 hours.
@@ -129,16 +163,21 @@ export default async function SubmitResultPage({
         </ul>
       </div>
 
-      {/* Module 3 will pass the real knockout fixtures into this component. */}
       <ResultSubmissionForm
         tournamentId={tournament.id}
         groupMatches={groupOptions}
-        knockoutMatches={[]}
+        knockoutMatches={knockoutOptions}
+        defaultTab={defaultTab}
       />
 
-      <Link href={`/groups/${tournament.id}`} className="btn-secondary">
-        View group standings &amp; fixtures
-      </Link>
+      <section className="space-y-3">
+        <Link href={`/groups/${tournament.id}`} className="btn-secondary">
+          View group standings &amp; fixtures
+        </Link>
+        <Link href={`/bracket/${tournament.id}`} className="btn-secondary">
+          View knockout bracket
+        </Link>
+      </section>
     </div>
   );
 }

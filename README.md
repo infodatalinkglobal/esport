@@ -14,11 +14,9 @@ groups of four, and fight their way to the Grand Final.
 | --- | --- | --- |
 | **Module 1** | Foundation + payments (register, pay, verify) | ✅ Built |
 | **Module 2** | Group stage (draw, standings, fixtures, results) | ✅ Built |
-| **Module 3** | Knockout stage + deployment | ⏳ Not started (on purpose) |
+| **Module 3** | Knockout stage + deployment | ✅ Built |
 
-Module 3 is deliberately **not built yet** — the build plan is one module at a
-time. The Knockout Match tab on `/submit-result` shows a "Coming soon"
-placeholder, and `/api/submit-result` politely refuses `kind: 'knockout'`.
+All three modules are complete.
 
 ---
 
@@ -85,7 +83,8 @@ Scripts: `npm run build`, `npm start`, `npm run typecheck`.
 | `/payment/verify` | Shows "Verifying payment…", asks the server to confirm with Paystack, then forwards to the success page |
 | `/payment/success` | ✅ confirmation with player name, tournament, match deadline, WhatsApp group + share buttons |
 | `/groups/[tournamentId]` | Every group's league table + fixtures, top 2 in green, auto-refreshes every 60 seconds |
-| `/submit-result` | Group Match / Knockout Match tabs (knockout is a Module 3 placeholder) |
+| `/bracket/[tournamentId]` | Semifinals and Grand Final as stacked cards, winner in green, champion banner, auto-refreshes every 60 seconds |
+| `/submit-result` | Group Match / Knockout Match tabs — knockout opens first once the bracket is drawn |
 
 ### API routes
 
@@ -95,7 +94,8 @@ Scripts: `npm run build`, `npm start`, `npm run typecheck`.
 | `POST /api/paystack/initialize` | Server-side Paystack transaction (amount can't be tampered with); returns the popup code **and** the redirect URL |
 | `POST /api/verify-payment` | Confirms the money with Paystack, marks the registration `paid` |
 | `POST /api/admin/draw-groups` | 🔒 Runs the group draw (see below) |
-| `POST /api/submit-result` | Records a player's group result, auto-confirms when both agree |
+| `POST /api/admin/draw-knockout` | 🔒 Builds the knockout bracket (see below) |
+| `POST /api/submit-result` | Records a group or knockout result, auto-confirms when both players agree |
 
 **Why five routes instead of the two in the brief:** the module rules require
 server-side checks that the browser cannot do safely (tournament open/full/not
@@ -110,7 +110,8 @@ Row Level Security). All of them use the service-role key on the server only.
 | `lib/paystack.ts` | `initializePayment()`, `verifyPayment()`, popup opener with redirect fallback |
 | `lib/calculations.ts` | `calculatePrizes()` — 15% cut, 70/30 split, integer pesewas |
 | `lib/groups.ts` | `shufflePlayers()`, `createGroups()`, `generateGroupFixtures()`, `updateStandings()`, `getTopTwo()`, `rankStandings()` |
-| `lib/data.ts` | Server-side loaders for tournaments, groups, standings, fixtures |
+| `lib/bracket.ts` | `createKnockoutBracket()`, `pairFirstKnockoutRound()`, `getGroupWinners()`, `checkAndResolveMatch()`, round labels and advancement |
+| `lib/data.ts` | Server-side loaders for tournaments, groups, standings, fixtures, brackets |
 | `lib/validation.ts` | Server-side validation for the registration and result forms |
 | `lib/format.ts` | Cedi/date/phone/WhatsApp helpers and match-status badges |
 
@@ -150,7 +151,7 @@ with phone numbers omitted. To redraw, delete the `groups`, `group_members`,
 
 Find the tournament UUID in **Supabase → Table Editor → tournaments → id**.
 
-### Step 3 — players submit results
+### Step 3 — players submit group results
 
 Players open `/submit-result` (or the link on the landing page), pick their
 fixture, enter both scores and upload a screenshot of the final scoreboard.
@@ -166,12 +167,57 @@ Standings follow the rules exactly: Win = 3, Draw = 1, Loss = 0, sorted by
 points → goal difference → goals scored → head-to-head. Anything still tied is
 yours to settle with a penalty shootout; set the order directly in Supabase.
 
+### Step 4 — draw the knockout bracket
+
+Once **every** group fixture is completed:
+
+```bash
+curl -X POST https://YOUR-DOMAIN/api/admin/draw-knockout \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"tournament_id":"THE-TOURNAMENT-UUID"}'
+```
+
+What it does:
+
+1. Refuses to run until every group fixture is `completed`.
+2. Ranks each group (points → goal difference → goals scored → head-to-head) and
+   takes the top 2.
+3. Creates the matchups — **Semifinal 1: Group A 1st vs Group B 2nd**,
+   **Semifinal 2: Group B 1st vs Group A 2nd** — plus the Grand Final as an empty
+   placeholder, so the whole route to the trophy is visible from day one.
+4. Sets the tournament status to `bracket_drawn`.
+
+Re-running is allowed while no knockout match has been completed, so a mistake
+can be corrected before anyone plays. After a match is completed the endpoint
+refuses to redraw the bracket.
+
+### Step 5 — players submit knockout results
+
+On `/submit-result` the Knockout Match tab now opens by default. Players pick
+their match, tap **I Won ✅** or **I Lost ❌** and upload their screenshot. Because
+knockout matches can't draw, there are no scores to compare — the two "who won?"
+claims are compared instead:
+
+- **both agree** → the match is confirmed, the winner is moved into the next
+  round automatically, and winning the Grand Final sets the tournament to
+  `completed`
+- **they disagree** → the match is `disputed` for you to review
+- **one submission** → saved, match stays `pending`, and the claim is kept
+  private so it can't be used to argue with the opponent
+
 ### Fixing a disputed match
 
-Open **Supabase → Table Editor → group_matches**, correct the scores, set
-`status` to `completed` and `winner_id` to the winner (leave it empty for a
-draw). Then re-save the standings by re-submitting through the app or editing
-`group_standings` directly.
+**Group match:** open **Supabase → Table Editor → group_matches**, correct the
+scores, set `status` to `completed` and `winner_id` to the winner (leave it empty
+for a draw). Then fix the numbers in `group_standings` too, or re-save the match
+in the app to recalculate them.
+
+**Knockout match:** open **Supabase → Table Editor → brackets**, set `status` to
+`completed` and `winner_id` to the winner. Then copy that player into the next
+round's row (`player_a_id` for a semifinal 1/2 winner, `player_b_id` for
+semifinal 2) — or just re-trigger the automatic move by setting the match back to
+`pending` with the scores/marker fixed and starting the app's standings recalculation.
 
 ---
 
@@ -211,9 +257,95 @@ draw). Then re-save the standings by re-submitting through the app or editing
 - [ ] DevTools at **375px**: no horizontal page scroll (the table scrolls
       inside its card), buttons ≥48px, body text ≥16px
 
-> The draw maths has been verified with 41 automated checks (group sizes,
-> 6 unique fixtures per group of four, points/GD/GF/head-to-head ordering,
-> shuffle fairness over 2000 runs). Ask if you want that test script committed.
+### Module 3 — knockout stage
+
+- [ ] `POST /api/admin/draw-knockout` before the group stage is finished →
+      "The group stage is not finished yet — N fixture(s) still need a result"
+- [ ] Without the secret → `401`; with it → Semifinal 1, Semifinal 2 and a
+      placeholder Grand Final
+- [ ] `brackets` in Supabase has 3 rows: `1/1`, `1/2` (real players) and `2/1`
+      (both players null), and the tournament status is `bracket_drawn`
+- [ ] `/bracket/<tournamentId>` shows "Semifinals" then "Grand Final 🏆", all
+      cards stacked vertically, Grand Final showing "Waiting for the previous
+      round"
+- [ ] `/submit-result` now opens on the **Knockout Match** tab
+- [ ] Submitting "I won" as one player → match stays Pending (claim kept private)
+- [ ] The opponent submitting "I lost" → Completed, winner in green, and the
+      winner appears in the Grand Final automatically
+- [ ] Both players claiming "I won" → 🔴 Disputed
+- [ ] Both semifinals decided → the Grand Final shows both finalists
+- [ ] Confirming the Grand Final → champion banner appears and the tournament
+      status becomes `completed`
+- [ ] Submitting twice from the same number → "You already submitted this result"
+- [ ] Any duplicate/false claim → the friendly messages in the brief
+      ("Phone number not registered", "Screenshot is required as proof")
+
+> The bracket maths has been verified with 33 automated checks (round labels and
+> numbering, A1 v B2 / B1 v A2 crossing, nobody meeting their own group, 6 unique
+> fixtures per group of four, slot advancement for a whole tournament, champion
+> detection, and no phone numbers leaving the server). Ask if you want the test
+> scripts committed.
+
+---
+
+## 🚀 Deploying to Vercel
+
+### 1. Push the code
+
+Already done — this repository is on the `arena/01a0ce95-esport` branch. Merge it
+into `main` (or point Vercel at the branch) before deploying.
+
+### 2. Import the project
+
+1. [vercel.com](https://vercel.com) → **Add New → Project** → import this repo
+2. Framework preset: **Next.js** (detected automatically) — no build settings to change
+
+### 3. Add the environment variables **before** the first deploy
+
+Vercel → Project → **Settings → Environment Variables**. Add every one of these
+for Production, Preview and Development:
+
+- [ ] `NEXT_PUBLIC_SUPABASE_URL`
+- [ ] `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- [ ] `SUPABASE_SERVICE_ROLE_KEY` ← secret, server only
+- [ ] `NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY` ← `pk_test_…` then `pk_live_…`
+- [ ] `PAYSTACK_SECRET_KEY` ← secret
+- [ ] `NEXT_PUBLIC_TOURNAMENT_ENTRY_FEE=1000`
+- [ ] `NEXT_PUBLIC_ORGANIZER_CUT_PERCENT=15`
+- [ ] `ADMIN_SECRET` ← long and random (`openssl rand -hex 24`)
+- [ ] `NEXT_PUBLIC_WHATSAPP_CONTACT` ← e.g. `233241234567`
+- [ ] `NEXT_PUBLIC_WHATSAPP_GROUP_INVITE_URL`
+- [ ] `NEXT_PUBLIC_SITE_URL` ← **the real domain**, e.g. `https://your-app.vercel.app`
+
+⚠️ `NEXT_PUBLIC_SITE_URL` matters: it is the Paystack callback target. If it
+still points at `localhost`, payments will not return to your confirmation page.
+
+### 4. Supabase checks
+
+- [ ] `setup.sql` has been run (all 7 tables exist)
+- [ ] Row Level Security is enabled on all 7 tables
+- [ ] The `result-screenshots` bucket exists (Storage → Buckets)
+- [ ] Switch Paystack to live keys when you are ready to take real money
+
+### 5. Full tournament dry run (in Paystack test mode)
+
+1. [ ] Register and pay as 8 players → all appear as `paid`
+2. [ ] `POST /api/admin/draw-groups` → 2 groups, 12 fixtures
+3. [ ] `/groups/<id>` shows both groups with the top 2 in green
+4. [ ] Submit all 12 group results (both sides each time) → standings correct
+5. [ ] `POST /api/admin/draw-knockout` → Semifinal 1, Semifinal 2, Grand Final
+6. [ ] `/bracket/<id>` shows the bracket and hides the winners until confirmed
+7. [ ] Submit both semifinals → the final fills in automatically
+8. [ ] Submit the final → champion banner + tournament status `completed`
+
+### 6. Mobile + performance
+
+- [ ] Run the whole flow on an Android phone (Chrome)
+- [ ] No horizontal scrolling on any page (tables scroll inside their own card)
+- [ ] Payment works in the phone's browser (popup *and* the blocked-popup fallback)
+- [ ] Screenshot upload works straight from the phone's camera roll
+- [ ] Lighthouse mobile audit: **score above 80** (First Load JS is ~92–101 kB;
+      run it on the deployed URL, not localhost, for realistic numbers)
 
 ---
 
@@ -262,13 +394,23 @@ Expected until you call `POST /api/admin/draw-groups` — see the admin section 
 
 ---
 
-## 🗺️ What comes next (Module 3)
+## 🗺️ Where the project stands
 
-- `lib/bracket.ts` — `getGroupWinners()`, `createKnockoutBracket()`, `checkAndResolveMatch()`
-- `/bracket/[tournamentId]` — vertical match cards, winners in green, 60-second refresh
-- Knockout tab on `/submit-result` — "I won" / "I lost" + screenshot, winner
-  automatically moved into the Grand Final
-- `POST /api/admin/draw-knockout` — SF1: A1 v B2, SF2: B1 v A2, then the Final
-- Vercel deployment checklist
+All three modules are built:
 
-Say **"Module 2 done"** and Module 3 will be built on top of this code.
+| Module | Delivered |
+| --- | --- |
+| 1 | Registration, Paystack payment (popup + redirect fallback), verification, success page, prize pool |
+| 2 | Group draw, standings with full tiebreakers, fixtures, group result submission |
+| 3 | Knockout bracket, knockout result submission, automatic advancement, deployment checklist |
+
+Deliberately **not** built, per the brief: user logins, an admin dashboard UI,
+leaderboards, in-app chat, automated payouts, multi-tournament UI, push
+notifications, native apps, referee accounts, anti-cheat, waitlists and a 3rd
+place match.
+
+### Small things you may want next
+
+- Commit the automated test scripts (41 group-stage checks + 33 bracket checks)
+- A Vercel Cron job to close registration automatically at the deadline
+- Organizer email/WhatsApp alert when a match becomes `disputed`

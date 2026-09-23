@@ -1,11 +1,11 @@
 'use client';
 
 /**
- * Result submission form (/submit-result) — MODULE 2: GROUP MATCHES ONLY.
+ * Result submission form (/submit-result) — MODULES 2 and 3.
  *
- * The tab switcher shows both tabs from the start, because the layout is part
- * of the brief. The Knockout Match tab is a "Coming soon" placeholder until
- * Module 3 wires it up.
+ * Two tabs, one form each:
+ *   Group Match    — phone, match, both scores, screenshot (Module 2)
+ *   Knockout Match — phone, match, "I won" / "I lost", screenshot (Module 3)
  *
  * Group flow:
  *   1. Player types the WhatsApp number they registered with.
@@ -18,8 +18,12 @@
  * resulting URL is posted to our API — so a 3MB photo never travels through
  * our server, which keeps the API fast on mobile data.
  *
- * After submitting, the match is confirmed automatically the moment the
- * opponent submits the same scoreline; conflicting scores mark it DISPUTED.
+ * Knockout flow: the same, except the player reports "I won" / "I lost" because
+ * knockout matches never draw. The match is confirmed as soon as both players
+ * agree, and the winner is moved into the next round automatically.
+ *
+ * Either way the match is confirmed the moment the opponent submits an agreeing
+ * result; conflicting submissions mark it DISPUTED for the organizer.
  */
 
 import { useMemo, useState } from 'react';
@@ -56,17 +60,27 @@ export default function ResultSubmissionForm({
   tournamentId,
   groupMatches,
   knockoutMatches,
+  defaultTab,
 }: ResultSubmissionFormProps) {
+  // The page passes `defaultTab` from the tournament status; the fallback keeps
+  // the form usable if it is ever rendered without that hint.
   const [tab, setTab] = useState<Tab>(
-    groupMatches.length > 0 ? 'group' : 'knockout',
+    defaultTab ?? (groupMatches.length > 0 ? 'group' : 'knockout'),
   );
 
-  // Form fields.
+  // Form fields (shared by both tabs).
   const [phone, setPhone] = useState('');
   const [matchId, setMatchId] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+
+  // Group tab only.
   const [myScore, setMyScore] = useState('');
   const [opponentScore, setOpponentScore] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+
+  // Knockout tab only: which player won, from this player's point of view.
+  const [knockoutResult, setKnockoutResult] = useState<'won' | 'lost' | null>(
+    null,
+  );
 
   // Submission state.
   const [busy, setBusy] = useState(false);
@@ -159,17 +173,23 @@ export default function ResultSubmissionForm({
     const mine = Number(myScore);
     const theirs = Number(opponentScore);
 
-    if (
-      myScore === '' ||
-      opponentScore === '' ||
-      !Number.isInteger(mine) ||
-      !Number.isInteger(theirs) ||
-      mine < 0 ||
-      theirs < 0 ||
-      mine > 99 ||
-      theirs > 99
-    ) {
-      setError('Enter both scores as whole numbers between 0 and 99.');
+    if (tab === 'group') {
+      if (
+        myScore === '' ||
+        opponentScore === '' ||
+        !Number.isInteger(mine) ||
+        !Number.isInteger(theirs) ||
+        mine < 0 ||
+        theirs < 0 ||
+        mine > 99 ||
+        theirs > 99
+      ) {
+        setError('Enter both scores as whole numbers between 0 and 99.');
+        return;
+      }
+    } else if (knockoutResult !== 'won' && knockoutResult !== 'lost') {
+      // Knockout matches never draw, so the player must pick a side.
+      setError('Choose whether you won or lost the match.');
       return;
     }
 
@@ -195,14 +215,24 @@ export default function ResultSubmissionForm({
       const response = await fetch('/api/submit-result', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind: 'group',
-          match_id: matchId,
-          phone_number: normalizePhone(phone),
-          my_score: mine,
-          opponent_score: theirs,
-          screenshot_url: screenshotUrl,
-        }),
+        body: JSON.stringify(
+          tab === 'group'
+            ? {
+                kind: 'group',
+                match_id: matchId,
+                phone_number: normalizePhone(phone),
+                my_score: mine,
+                opponent_score: theirs,
+                screenshot_url: screenshotUrl,
+              }
+            : {
+                kind: 'knockout',
+                match_id: matchId,
+                phone_number: normalizePhone(phone),
+                knockout_result: knockoutResult,
+                screenshot_url: screenshotUrl,
+              },
+        ),
       });
 
       const data = (await response.json()) as {
@@ -228,17 +258,27 @@ export default function ResultSubmissionForm({
         message:
           data.message ??
           (data.confirmed
-            ? 'Both players submitted the same score, so the match is confirmed and the group table has been updated.'
-            : 'Your screenshot is in. The match is confirmed automatically as soon as your opponent submits the same score.'),
+            ? 'Both players agree, so the match is confirmed.'
+            : 'Your screenshot is in. The match is confirmed automatically as soon as your opponent submits the same result.'),
       });
 
       // Reset the form but keep the phone number for a second submission.
       setMyScore('');
       setOpponentScore('');
+      setKnockoutResult(null);
       setFile(null);
       setMatchId('');
-      const input = document.getElementById('screenshot') as HTMLInputElement | null;
-      if (input) input.value = '';
+
+      // Clear the file input too (only a DOM reset can do that).
+      const groupInput = document.getElementById(
+        'screenshot',
+      ) as HTMLInputElement | null;
+      if (groupInput) groupInput.value = '';
+
+      const knockoutInput = document.getElementById(
+        'knockout_screenshot',
+      ) as HTMLInputElement | null;
+      if (knockoutInput) knockoutInput.value = '';
     } catch (thrown) {
       setError(
         thrown instanceof Error
@@ -297,32 +337,166 @@ export default function ResultSubmissionForm({
         </button>
       </div>
 
-      {/* ============ Knockout tab — Module 3 placeholder =============== */}
+      {/* ================= Knockout tab (Module 3) ====================== */}
       {tab === 'knockout' ? (
-        <div className="card border-amber-500/40 bg-amber-500/10">
-          <h3 className="text-base font-semibold text-amber-200">
-            Knockout Match — Coming soon
-          </h3>
-          <p className="mt-1 text-sm text-amber-100">
-            Knockout results open as soon as the organizer draws the bracket
-            (after every group match is finished). Until then, submit your group
-            match results on the Group Match tab.
-          </p>
-          <a
-            href={whatsappLink(
-              undefined,
-              'Hi! I want to know when the knockout stage starts.',
-            )}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-secondary mt-3"
-          >
-            Ask the organizer on WhatsApp
-          </a>
-        </div>
-      ) : (
-        /* =================== Group tab ================================= */
         <form onSubmit={handleSubmit} className="card space-y-4" noValidate>
+          {options.length === 0 ? (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+              <p className="font-semibold">You have no active knockout matches</p>
+              <p className="mt-1">
+                Knockout fixtures appear here once the organizer draws the
+                bracket (after every group match is finished) and your name is in
+                it.
+              </p>
+            </div>
+          ) : null}
+
+          <div>
+            <label className="field-label" htmlFor="knockout_phone">
+              Your WhatsApp number
+            </label>
+            <input
+              id="knockout_phone"
+              className="field"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              placeholder="0241234567"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              required
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Use the number you registered with — it is how we know which player
+              you are.
+            </p>
+          </div>
+
+          <div>
+            <label className="field-label" htmlFor="knockout_match_id">
+              Knockout match
+            </label>
+            <select
+              id="knockout_match_id"
+              className="field"
+              value={matchId}
+              onChange={(event) => setMatchId(event.target.value)}
+              required
+            >
+              <option value="">
+                {options.length > 0
+                  ? 'Choose your match…'
+                  : 'No open knockout matches right now'}
+              </option>
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              Only matches still waiting for a result are listed.
+            </p>
+          </div>
+
+          <fieldset>
+            <legend className="field-label">Your result</legend>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                aria-pressed={knockoutResult === 'won'}
+                onClick={() => setKnockoutResult('won')}
+                className={`flex min-h-[56px] items-center justify-center gap-2 rounded-xl border px-3 text-base font-bold transition ${
+                  knockoutResult === 'won'
+                    ? 'border-pitch-500 bg-pitch-500/20 text-pitch-400'
+                    : 'border-white/15 bg-slate-900/50 text-slate-200'
+                }`}
+              >
+                I Won <span aria-hidden="true">✅</span>
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={knockoutResult === 'lost'}
+                onClick={() => setKnockoutResult('lost')}
+                className={`flex min-h-[56px] items-center justify-center gap-2 rounded-xl border px-3 text-base font-bold transition ${
+                  knockoutResult === 'lost'
+                    ? 'border-red-500 bg-red-500/20 text-red-200'
+                    : 'border-white/15 bg-slate-900/50 text-slate-200'
+                }`}
+              >
+                I Lost <span aria-hidden="true">❌</span>
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Knockout matches never end in a draw — extra time and penalties
+              decide it. Both players must agree before the winner is confirmed.
+            </p>
+          </fieldset>
+
+          <div>
+            <label className="field-label" htmlFor="knockout_screenshot">
+              Screenshot of the final scoreboard (required)
+            </label>
+            <input
+              id="knockout_screenshot"
+              className="field file:mr-3 file:rounded-lg file:border-0 file:bg-pitch-500 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-950"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              required
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              JPG, PNG or WebP, up to 5MB. If the two players disagree, the match
+              becomes DISPUTED and the organizer reviews it within 24 hours.
+            </p>
+          </div>
+
+          {error ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200"
+            >
+              <p>{error}</p>
+              <a
+                href={whatsappLink(
+                  undefined,
+                  'Hi, I had a problem submitting my DLS knockout result.',
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block min-h-tap font-semibold text-pitch-400 underline"
+              >
+                Contact organizer on WhatsApp
+              </a>
+            </div>
+          ) : null}
+
+          {outcome ? (
+            <div
+              role="status"
+              className={
+                outcome.tone === 'success'
+                  ? 'rounded-xl border border-pitch-500/40 bg-pitch-500/10 p-3 text-sm text-pitch-100'
+                  : 'rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100'
+              }
+            >
+              <p className="font-semibold">{outcome.title}</p>
+              <p className="mt-1">{outcome.message}</p>
+            </div>
+          ) : null}
+
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? 'Uploading and saving…' : 'Submit result'}
+          </button>
+
+          <p className="text-center text-xs text-slate-500">
+            Prizes are paid by MoMo within 1 hour of the Grand Final.
+          </p>
+        </form>
+      ) : (
+        /* ================== Group tab (Module 2) ====================== */
+                <form onSubmit={handleSubmit} className="card space-y-4" noValidate>
           <div>
             <label className="field-label" htmlFor="result_phone">
               Your WhatsApp number

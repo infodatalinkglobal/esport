@@ -9,7 +9,7 @@
  * MODULE 1: tournaments and player counts.
  * MODULE 2: groups, standings and fixtures (plus the player-name map that
  *           decorates them).
- * MODULE 3 will add the bracket loaders.
+ * MODULE 3: the knockout bracket loaders.
  *
  * ⚠️ The `paid`/player loaders below return rows that include phone numbers.
  * They are for server-side use only — use `toPublicPlayer()` (lib/groups.ts)
@@ -17,6 +17,8 @@
  */
 
 import type {
+  Bracket,
+  BracketMatchView,
   FixtureView,
   Group,
   GroupMatch,
@@ -29,6 +31,7 @@ import type {
 } from '@/types';
 import { isSupabaseConfigured, supabaseAdmin } from './supabase';
 import { groupFixturesByGroup, rankStandings } from './groups';
+import { knockoutMatchLabel } from './bracket';
 
 /**
  * Loads the tournament the landing page should advertise.
@@ -343,5 +346,91 @@ export async function getGroupStage(tournamentId: string): Promise<{
   } catch (error) {
     console.error('[data.getGroupStage]', error);
     return empty;
+  }
+}
+
+/* ==========================================================================
+ * MODULE 3 — knockout bracket
+ * ========================================================================== */
+
+/**
+ * Loads every knockout match of a tournament (raw rows).
+ *
+ * @param tournamentId The tournament's UUID.
+ * @returns Matches ordered by round, then match number.
+ */
+export async function getBracketMatches(
+  tournamentId: string,
+): Promise<Bracket[]> {
+  if (!isSupabaseConfigured() || !tournamentId) return [];
+
+  try {
+    const supabase = supabaseAdmin();
+    const { data } = await supabase
+      .from('brackets')
+      .select('*')
+      .eq('tournament_id', tournamentId)
+      .order('round', { ascending: true })
+      .order('match_number', { ascending: true });
+
+    return (data ?? []) as Bracket[];
+  } catch (error) {
+    console.error('[data.getBracketMatches]', error);
+    return [];
+  }
+}
+
+/**
+ * Loads the knockout bracket with player names resolved and round labels
+ * attached, ready for the bracket page.
+ *
+ * A provisional winner is deliberately hidden: while a match is 'pending' the
+ * `winner_id` column holds the first player's claim, and showing that to the
+ * opponent would be unfair, so `winner_name` is only filled in for completed
+ * matches.
+ *
+ * @param tournamentId The tournament's UUID.
+ * @returns The bracket, ordered by round then match number.
+ */
+export async function getBracketView(
+  tournamentId: string,
+  matches?: Bracket[],
+): Promise<BracketMatchView[]> {
+  if (!isSupabaseConfigured() || !tournamentId) return [];
+
+  try {
+    const rows = matches ?? (await getBracketMatches(tournamentId));
+    if (rows.length === 0) return [];
+
+    const players = await getPlayerMap(tournamentId);
+    const totalRounds = Math.max(...rows.map((row) => row.round));
+
+    return rows.map((match) => ({
+      ...match,
+      round_label: knockoutMatchLabel(
+        match.round,
+        match.match_number,
+        totalRounds,
+      ),
+      player_a_name: match.player_a_id
+        ? (players[match.player_a_id]?.player_name ?? 'Unknown player')
+        : null,
+      player_a_team: match.player_a_id
+        ? (players[match.player_a_id]?.dls_team_name ?? null)
+        : null,
+      player_b_name: match.player_b_id
+        ? (players[match.player_b_id]?.player_name ?? 'Unknown player')
+        : null,
+      player_b_team: match.player_b_id
+        ? (players[match.player_b_id]?.dls_team_name ?? null)
+        : null,
+      winner_name:
+        match.status === 'completed' && match.winner_id
+          ? (players[match.winner_id]?.player_name ?? null)
+          : null,
+    }));
+  } catch (error) {
+    console.error('[data.getBracketView]', error);
+    return [];
   }
 }

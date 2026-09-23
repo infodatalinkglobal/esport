@@ -9,8 +9,8 @@
  *   Group, GroupMember, GroupMatch, GroupStanding, GroupDraw — plus the view
  *   models the standings/fixtures pages render and the result-submission types.
  *
- * MODULE 3 (Knockout) will add its own types (Bracket, KnockoutResult) to this
- * file; nothing already here needs to change for that.
+ * MODULE 3 (Knockout):
+ *   Bracket, KnockoutResult, GroupQualifier, BracketMatchView, DrawKnockoutResult.
  *
  * Every field name matches the Supabase columns in `setup.sql` exactly, so a
  * database row can be used as a typed object with no mapping layer.
@@ -139,6 +139,108 @@ export interface GroupMember {
  * - `disputed`  the two submissions contradicted each other
  */
 export type MatchStatus = 'pending' | 'completed' | 'disputed';
+
+/* ==========================================================================
+ * MODULE 3 — knockout stage rows
+ * ========================================================================== */
+
+/**
+ * A row of the `brackets` table (one knockout match).
+ *
+ * Rounds are numbered from 1:
+ *   - 4 qualifiers (2 groups): round 1 = Semifinals, round 2 = Grand Final
+ *   - 8 qualifiers (4 groups): round 1 = Quarterfinals, round 2 = Semifinals,
+ *     round 3 = Grand Final
+ *
+ * NOTE on `winner_id` while a match is still 'pending': it holds the FIRST
+ * player's claim so the second player's claim can be compared against it. The
+ * app only displays it once `status` is 'completed'.
+ */
+export interface Bracket {
+  /** Primary key (UUID) — the "match id" players pick in the result form. */
+  id: string;
+  /** Tournament this match belongs to. */
+  tournament_id: string;
+  /** 1-based round number (see the note above). */
+  round: number;
+  /** 1-based match number inside that round. */
+  match_number: number;
+  /** Player A's `registrations.id`; null until the previous round decides it. */
+  player_a_id: string | null;
+  /** Player B's `registrations.id`; null until the previous round decides it. */
+  player_b_id: string | null;
+  /** Confirmed winner, or the first player's claim while the match is pending. */
+  winner_id: string | null;
+  /** Public URL of Player A's scoreboard screenshot (their proof). */
+  player_a_screenshot: string | null;
+  /** Public URL of Player B's scoreboard screenshot (their proof). */
+  player_b_screenshot: string | null;
+  /** See {@link MatchStatus}. */
+  status: MatchStatus;
+  /** ISO timestamp of row creation. */
+  created_at: string;
+}
+
+/**
+ * A player who has qualified from the group stage.
+ * Position 1 is the group winner, position 2 is the runner-up.
+ */
+export interface GroupQualifier {
+  /** The full registration row (server-side only — reduce before sending on). */
+  player: Registration;
+  /** The group they came from, e.g. 'A'. */
+  group_name: string;
+  /** 1 for the group winner, 2 for the runner-up. */
+  position: number;
+}
+
+/**
+ * A self-reported knockout result, as submitted by one player.
+ *
+ * The player identifies the match by `match_id` rather than by match number,
+ * because match numbers restart every round (Semifinal 1 and the Grand Final are
+ * both "match 1") — an id can never be ambiguous.
+ */
+export interface KnockoutResult {
+  /** The WhatsApp number the player registered with. */
+  phone_number: string;
+  /** The tournament being played. */
+  tournament_id: string;
+  /** The `brackets.id` being reported. */
+  match_id: string;
+  /** What the player says happened, from their point of view. */
+  result: 'won' | 'lost';
+  /** Public URL of the uploaded screenshot (required proof). */
+  screenshot_url: string;
+}
+
+/**
+ * A knockout match with player names resolved and its round labelled,
+ * ready for `<BracketCard />`.
+ */
+export interface BracketMatchView extends Bracket {
+  /** Human label for the round, e.g. "Semifinal 1" or "Grand Final". */
+  round_label: string;
+  /** Player A's display name, or null while the slot is undecided. */
+  player_a_name: string | null;
+  /** Player A's DLS club name, or null. */
+  player_a_team: string | null;
+  /** Player B's display name, or null while the slot is undecided. */
+  player_b_name: string | null;
+  /** Player B's DLS club name, or null. */
+  player_b_team: string | null;
+  /** Winner's display name once the match is completed. */
+  winner_name: string | null;
+}
+
+/** Result of `POST /api/admin/draw-knockout`. */
+export interface DrawKnockoutResult {
+  success: boolean;
+  /** Every matchup that was created, with its round label. */
+  matchups: BracketMatchView[];
+  /** User-safe error message when `success` is false. */
+  error?: string;
+}
 
 /** A row of the `group_matches` table (one round-robin fixture). */
 export interface GroupMatch {
@@ -409,7 +511,7 @@ export interface VerifyPaymentResponse {
 
 /**
  * Which competition a result belongs to.
- * Module 3 adds the 'knockout' branch; Module 2 only accepts 'group'.
+ * Both branches are live in Module 3.
  */
 export type MatchKind = 'group' | 'knockout';
 
@@ -426,6 +528,20 @@ export interface SubmitGroupResultPayload {
   /** The score this player says their opponent finished with. */
   opponent_score: number;
   /** Public URL of the uploaded scoreboard screenshot (proof). */
+  screenshot_url: string;
+}
+
+/** Body accepted by `POST /api/submit-result` for a KNOCKOUT match (Module 3). */
+export interface SubmitKnockoutResultPayload {
+  /** Always 'knockout'. */
+  kind: 'knockout';
+  /** The `brackets.id` being reported. */
+  match_id: string;
+  /** The WhatsApp number the player registered with — identifies their side. */
+  phone_number: string;
+  /** What happened, from this player's point of view. */
+  knockout_result: 'won' | 'lost';
+  /** Public URL of the uploaded screenshot (proof). */
   screenshot_url: string;
 }
 
@@ -546,8 +662,13 @@ export interface MatchOption {
 export interface ResultSubmissionFormProps {
   /** Tournament the matches belong to (null when nothing has been drawn yet). */
   tournamentId: string | null;
-  /** Group fixtures a player can report. */
+  /** Group fixtures a player can report (empty once the group stage is over). */
   groupMatches: MatchOption[];
-  /** Knockout matches — empty in Module 2; filled in by Module 3. */
+  /** Knockout matches a player can report (empty before the bracket is drawn). */
   knockoutMatches: MatchOption[];
+  /**
+   * Which tab opens first. The page decides from the tournament status: the
+   * Knockout tab once the bracket is drawn, otherwise the Group tab.
+   */
+  defaultTab?: MatchKind;
 }

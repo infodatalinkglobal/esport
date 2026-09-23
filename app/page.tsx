@@ -264,20 +264,27 @@ export default async function HomePage() {
         />
       </section>
 
-      {/* ============ PLAYER LINKS (Module 2 pages) ====================== */}
+      {/* ============ PLAYER LINKS (group + knockout pages) ============== */}
       <section aria-labelledby="links-heading" className="space-y-3">
         <h2 id="links-heading" className="text-lg font-bold text-white">
-          Group Stage
+          Match Centre
         </h2>
         <Link href={`/groups/${tournament.id}`} className="btn-secondary">
-          View group standings &amp; fixtures
+          Group standings &amp; fixtures
         </Link>
-        <Link href={`/submit-result?tournament=${tournament.id}`} className="btn-secondary">
+        <Link href={`/bracket/${tournament.id}`} className="btn-secondary">
+          Knockout bracket
+        </Link>
+        <Link
+          href={`/submit-result?tournament=${tournament.id}`}
+          className="btn-secondary"
+        >
           Submit a match result
         </Link>
         <p className="text-xs text-slate-500">
-          Standings update automatically after every confirmed result. Once
-          every group match is played, the organizer draws the knockout bracket.
+          Standings and the bracket update automatically after every confirmed
+          result. Once every group match is played, the organizer draws the
+          knockout bracket.
         </p>
       </section>
 
