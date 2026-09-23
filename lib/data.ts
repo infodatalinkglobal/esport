@@ -40,15 +40,26 @@ import { knockoutMatchLabel } from './bracket';
  * 1. the most recently created tournament that is not finished,
  * 2. otherwise the most recently created tournament.
  *
- * @returns The tournament, or null when none exists / Supabase is not set up.
+ * @returns The tournament, or null if none can be loaded (including on error).
  */
 export async function getActiveTournament(): Promise<Tournament | null> {
-  if (!isSupabaseConfigured()) return null;
+  return (await getActiveTournamentWithStatus()).tournament;
+}
+
+/**
+ * Keeps query failures visible to the home page without changing the nullable
+ * result used by other pages.
+ */
+export async function getActiveTournamentWithStatus(): Promise<{
+  tournament: Tournament | null;
+  failed: boolean;
+}> {
+  if (!isSupabaseConfigured()) return { tournament: null, failed: false };
 
   try {
     const supabase = supabaseAdmin();
 
-    const { data: active } = await supabase
+    const { data: active, error: activeError } = await supabase
       .from('tournaments')
       .select('*')
       .neq('status', 'completed')
@@ -56,19 +67,27 @@ export async function getActiveTournament(): Promise<Tournament | null> {
       .limit(1)
       .maybeSingle();
 
-    if (active) return active as Tournament;
+    // Supabase returns query errors in the response rather than throwing them.
+    if (activeError) console.error('[data.getActiveTournament]', activeError);
+    if (active) {
+      return { tournament: active as Tournament, failed: Boolean(activeError) };
+    }
 
-    const { data: latest } = await supabase
+    const { data: latest, error: latestError } = await supabase
       .from('tournaments')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    return (latest as Tournament) ?? null;
+    if (latestError) console.error('[data.getActiveTournament]', latestError);
+    return {
+      tournament: (latest as Tournament) ?? null,
+      failed: Boolean(activeError || latestError),
+    };
   } catch (error) {
     console.error('[data.getActiveTournament]', error);
-    return null;
+    return { tournament: null, failed: true };
   }
 }
 

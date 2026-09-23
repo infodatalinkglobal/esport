@@ -19,7 +19,7 @@ import PrizeBreakdown from '@/components/PrizeBreakdown';
 import RegistrationForm from '@/components/RegistrationForm';
 import { calculatePrizes, formatCedis } from '@/lib/calculations';
 import { formatDateTime } from '@/lib/format';
-import { getActiveTournament, getRegistrationCounts } from '@/lib/data';
+import { getActiveTournamentWithStatus, getRegistrationCounts } from '@/lib/data';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 /** Player counts and deadlines change constantly — never cache this page. */
@@ -94,12 +94,11 @@ const RULES: Array<{ title: string; items: string[] }> = [
  * Renders the landing page.
  */
 export default async function HomePage() {
-  const tournament = await getActiveTournament();
+  const { tournament, failed } = await getActiveTournamentWithStatus();
 
-  // ------------------------------------------------------ no tournament yet
-  // Shown when the environment is not set up yet, or when setup.sql has not
-  // created a tournament, or when every tournament is finished.
-  if (!tournament) {
+  // -------------------------------------- no tournament / database unavailable
+  // Keep a failed database read distinct from an empty tournament list.
+  if (!tournament || failed) {
     return (
       <div className="space-y-6">
         <section className="text-center">
@@ -135,6 +134,15 @@ export default async function HomePage() {
             </ol>
             <p className="mt-3 text-xs text-amber-200/80">
               Full instructions are in README.md and .env.example.
+            </p>
+          </section>
+        ) : failed ? (
+          <section className="card border-amber-500/40 bg-amber-500/10">
+            <h2 className="text-base font-semibold text-amber-200">
+              We can’t reach the tournament database right now
+            </h2>
+            <p className="mt-1 text-sm text-amber-100">
+              Contact the organizer on WhatsApp using the link below.
             </p>
           </section>
         ) : (
