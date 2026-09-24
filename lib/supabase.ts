@@ -22,6 +22,13 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * Next.js extends server-side fetch with a Data Cache. Supabase's REST requests
+ * go through fetch, so bypass that cache to keep live database reads fresh.
+ */
+const noStoreFetch: typeof fetch = (input, init) =>
+  globalThis.fetch(input, { ...init, cache: 'no-store' });
+
 /** Cached service-role client, created on first use. */
 let serviceClient: SupabaseClient | null = null;
 
@@ -65,6 +72,7 @@ export function supabaseAdmin(): SupabaseClient {
   if (!serviceClient) {
     serviceClient = createClient(url, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: noStoreFetch },
     });
   }
 

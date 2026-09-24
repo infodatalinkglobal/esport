@@ -137,10 +137,15 @@ export async function getRegistrationCounts(tournamentId: string): Promise<{
 
   try {
     const supabase = supabaseAdmin();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('registrations')
       .select('payment_status')
       .eq('tournament_id', tournamentId);
+
+    if (error) {
+      console.error('[data.getRegistrationCounts]', error);
+      return empty;
+    }
 
     const rows = (data ?? []) as Array<{ payment_status: string }>;
 
