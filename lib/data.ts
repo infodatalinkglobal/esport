@@ -24,7 +24,10 @@ import type {
   GroupMatch,
   GroupStanding,
   GroupWithStandings,
+  ChampionEntry,
   PublicPlayer,
+  PlayerFixtureView,
+  PlayerTournamentView,
   Registration,
   StandingRow,
   Tournament,
@@ -33,6 +36,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabaseAdmin } from './supabase';
 import { groupFixturesByGroup, rankStandings } from './groups';
 import { knockoutMatchLabel } from './bracket';
+import { isValidGhanaPhone, normalizePhone } from './format';
+import { calculatePrizes } from './calculations';
+import {
+  playerGroupFixtureView,
+  playerKnockoutFixtureView,
+} from './player-view';
 
 /**
  * Loads the tournament the landing page should advertise.
@@ -467,6 +476,272 @@ export async function getBracketView(
     }));
   } catch (error) {
     console.error('[data.getBracketView]', error);
+    return [];
+  }
+}
+
+/* ==========================================================================
+ * PLAYER DASHBOARD + CHAMPIONS HALL
+ * ========================================================================== */
+
+/**
+ * Loads everything one player (found by WhatsApp number) can see about
+ * themselves: their registration, group position, fixtures and knockout
+ * matches — each rendered from their own perspective.
+ *
+ * Privacy: the player's own phone number identifies them, but no phone number
+ * (theirs or anyone else's) is returned — opponents appear as names only, and
+ * matches are arranged through the WhatsApp group per the published rules.
+ *
+ * @param rawPhone The WhatsApp number the player typed (any Ghanaian format).
+ * @param tournamentLimit How many most-recent registrations to show (default 3).
+ * @returns One {@link PlayerTournamentView} per registration, newest first;
+ *          an empty array when the number is invalid or nothing is found.
+ */
+export async function getPlayerDashboard(
+  rawPhone: string,
+  tournamentLimit = 3,
+): Promise<PlayerTournamentView[]> {
+  const phone = normalizePhone(rawPhone ?? '');
+  if (!isValidGhanaPhone(phone) || !isSupabaseConfigured()) return [];
+
+  try {
+    const supabase = supabaseAdmin();
+
+    const { data: registrationRows } = await supabase
+      .from('registrations')
+      .select(
+        'id, tournament_id, player_name, dls_team_name, payment_status, created_at',
+      )
+      .eq('phone_number', phone)
+      .order('created_at', { ascending: false })
+      .limit(tournamentLimit);
+
+    const registrations = (registrationRows ?? []) as Array<
+      Pick<
+        Registration,
+        | 'id'
+        | 'tournament_id'
+        | 'player_name'
+        | 'dls_team_name'
+        | 'payment_status'
+        | 'created_at'
+      >
+    >;
+
+    if (registrations.length === 0) return [];
+
+    const views: PlayerTournamentView[] = [];
+
+    for (const registration of registrations) {
+      const tournament = await getTournamentById(registration.tournament_id);
+      if (!tournament) continue;
+
+      const players = await getPlayerMap(tournament.id);
+      const teams: Record<string, string> = {};
+      Object.entries(players).forEach(([id, player]) => {
+        teams[id] = player.dls_team_name;
+      });
+      const names: Record<string, string> = {};
+      Object.entries(players).forEach(([id, player]) => {
+        names[id] = player.player_name;
+      });
+
+      // --- Which group is this player in? --------------------------------
+      const { data: membership } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('player_id', registration.id)
+        .maybeSingle();
+
+      let groupName: string | null = null;
+      let position: number | null = null;
+
+      if (membership?.group_id) {
+        const groupId = membership.group_id as string;
+
+        const { data: groupRow } = await supabase
+          .from('groups')
+          .select('id, group_name')
+          .eq('id', groupId)
+          .maybeSingle();
+
+        groupName = (groupRow?.group_name as string) ?? null;
+
+        if (groupRow) {
+          // Rank the whole group so the player's position uses the same
+          // tiebreakers as the public standings page.
+          const [{ data: standingRows }, { data: matchRows }] =
+            await Promise.all([
+              supabase
+                .from('group_standings')
+                .select('*')
+                .eq('group_id', groupId),
+              supabase.from('group_matches').select('*').eq('group_id', groupId),
+            ]);
+
+          const rows = ((standingRows ?? []) as GroupStanding[]).map((row) => ({
+            ...row,
+            player_name: players[row.player_id]?.player_name ?? 'Unknown player',
+            dls_team_name: players[row.player_id]?.dls_team_name ?? '—',
+          }));
+
+          const mine = rows.find((row) => row.player_id === registration.id);
+          if (mine) {
+            const ranked = rankStandings(
+              rows,
+              (matchRows ?? []) as GroupMatch[],
+            );
+            position = ranked.find((row) => row.player_id === registration.id)
+              ?.position ?? null;
+          }
+        }
+      }
+
+      // --- This player's group fixtures ----------------------------------
+      const { data: myGroupMatchRows } = await supabase
+        .from('group_matches')
+        .select('*')
+        .eq('tournament_id', tournament.id)
+        .or(
+          `player_a_id.eq.${registration.id},player_b_id.eq.${registration.id}`,
+        )
+        .order('match_number', { ascending: true });
+
+      const groupFixtures = ((myGroupMatchRows ?? []) as GroupMatch[])
+        .map((match) =>
+          playerGroupFixtureView(match, registration.id, names, teams),
+        )
+        .filter((view): view is PlayerFixtureView => view !== null);
+
+      // --- This player's knockout matches --------------------------------
+      const { data: myBracketRows } = await supabase
+        .from('brackets')
+        .select('*')
+        .eq('tournament_id', tournament.id)
+        .or(
+          `player_a_id.eq.${registration.id},player_b_id.eq.${registration.id}`,
+        )
+        .order('round', { ascending: true })
+        .order('match_number', { ascending: true });
+
+      const bracketRows = (myBracketRows ?? []) as Bracket[];
+      const totalRounds = bracketRows.length
+        ? Math.max(...bracketRows.map((row) => row.round))
+        : 1;
+
+      const knockoutMatches = bracketRows
+        .map((match) =>
+          playerKnockoutFixtureView(
+            match,
+            registration.id,
+            match.player_a_id === registration.id
+              ? (players[match.player_b_id ?? '']?.player_name ?? null)
+              : (players[match.player_a_id ?? '']?.player_name ?? null),
+            match.player_a_id === registration.id
+              ? (teams[match.player_b_id ?? ''] ?? null)
+              : (teams[match.player_a_id ?? ''] ?? null),
+            knockoutMatchLabel(
+              match.round,
+              match.match_number,
+              totalRounds,
+            ),
+          ),
+        )
+        .filter((view): view is PlayerFixtureView => view !== null);
+
+      views.push({
+        tournament,
+        player_name: registration.player_name,
+        dls_team_name: registration.dls_team_name,
+        payment_status: registration.payment_status,
+        group_name: groupName,
+        group_position: position,
+        group_fixtures: groupFixtures,
+        knockout_matches: knockoutMatches,
+      });
+    }
+
+    return views;
+  } catch (error) {
+    console.error('[data.getPlayerDashboard]', error);
+    return [];
+  }
+}
+
+/**
+ * Loads the completed tournaments for the Champions Hall: champion and
+ * runner-up names from each Grand Final, plus the prizes that were paid.
+ *
+ * @param limit How many tournaments to show (default 10, newest first).
+ * @returns Champion entries; tournaments without a decided final are skipped,
+ *          and a failure degrades to an empty list.
+ */
+export async function getChampionsHall(limit = 10): Promise<ChampionEntry[]> {
+  if (!isSupabaseConfigured()) return [];
+
+  try {
+    const supabase = supabaseAdmin();
+
+    const { data: tournamentRows } = await supabase
+      .from('tournaments')
+      .select('*')
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    const tournaments = (tournamentRows ?? []) as Tournament[];
+    if (tournaments.length === 0) return [];
+
+    const entries: ChampionEntry[] = [];
+
+    for (const tournament of tournaments) {
+      const { data: bracketRows } = await supabase
+        .from('brackets')
+        .select('*')
+        .eq('tournament_id', tournament.id);
+
+      const brackets = (bracketRows ?? []) as Bracket[];
+      if (brackets.length === 0) continue;
+
+      const finalRound = Math.max(...brackets.map((row) => row.round));
+      const finalMatch = brackets.find(
+        (row) => row.round === finalRound && row.match_number === 1,
+      );
+
+      if (!finalMatch || finalMatch.status !== 'completed' || !finalMatch.winner_id) {
+        continue;
+      }
+
+      const winnerId = finalMatch.winner_id;
+      const runnerUpId =
+        finalMatch.player_a_id === winnerId
+          ? finalMatch.player_b_id
+          : finalMatch.player_a_id;
+
+      if (!runnerUpId) continue;
+
+      const players = await getPlayerMap(tournament.id);
+      const champion = players[winnerId];
+      const runnerUp = players[runnerUpId];
+      if (!champion || !runnerUp) continue;
+
+      const prizes = calculatePrizes(tournament.max_players, tournament.entry_fee);
+
+      entries.push({
+        tournament,
+        champion_name: champion.player_name,
+        champion_team: champion.dls_team_name,
+        runner_up_name: runnerUp.player_name,
+        runner_up_team: runnerUp.dls_team_name,
+        champion_prize: prizes.winnerPrize,
+        runner_up_prize: prizes.runnerUpPrize,
+      });
+    }
+
+    return entries;
+  } catch (error) {
+    console.error('[data.getChampionsHall]', error);
     return [];
   }
 }

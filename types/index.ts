@@ -672,3 +672,74 @@ export interface ResultSubmissionFormProps {
    */
   defaultTab?: MatchKind;
 }
+
+/* ==========================================================================
+ * PLAYER DASHBOARD + CHAMPIONS HALL (view models)
+ * ========================================================================== */
+
+/** One of the player's matches, rendered from their own perspective. */
+export interface PlayerFixtureView {
+  /** `group_matches.id` or `brackets.id`. */
+  match_id: string;
+  /** Fixture number inside the group (group matches only, else null). */
+  match_number: number | null;
+  /** Human round label, e.g. 'Semifinal 1' (knockout matches only). */
+  round_label: string | null;
+  /** The other player's display name — never their phone number. */
+  opponent_name: string;
+  /** The other player's DLS club name. */
+  opponent_team: string | null;
+  /** The viewing player's score (group matches only). */
+  my_score: number | null;
+  /** The opponent's score (group matches only). */
+  opponent_score: number | null;
+  status: MatchStatus;
+  /** 'won' | 'lost' | 'draw' once confirmed, null while undecided. */
+  outcome: 'won' | 'lost' | 'draw' | null;
+  /** True when this player has submitted their screenshot/claim. */
+  i_submitted: boolean;
+  /** True when the opponent has submitted theirs. */
+  opponent_submitted: boolean;
+}
+
+/**
+ * Everything one player sees about one tournament on the My Matches page.
+ * Opponents appear as names only — matches are arranged in the WhatsApp group,
+ * so phone numbers never leave the server.
+ */
+export interface PlayerTournamentView {
+  /** The tournament this registration belongs to. */
+  tournament: Tournament;
+  /** The player's display name. */
+  player_name: string;
+  /** The player's DLS club name. */
+  dls_team_name: string;
+  /** Their payment state for this tournament. */
+  payment_status: PaymentStatus;
+  /** Group letter once drawn, null before the draw. */
+  group_name: string | null;
+  /** Position inside the group after the tiebreakers, null while unknown. */
+  group_position: number | null;
+  /** This player's group fixtures, newest perspective first. */
+  group_fixtures: PlayerFixtureView[];
+  /** This player's knockout matches. */
+  knockout_matches: PlayerFixtureView[];
+}
+
+/** One completed tournament on the Champions Hall. */
+export interface ChampionEntry {
+  /** The completed tournament. */
+  tournament: Tournament;
+  /** Grand Final winner's display name. */
+  champion_name: string;
+  /** Champion's DLS club name. */
+  champion_team: string;
+  /** Grand Final runner-up's display name. */
+  runner_up_name: string;
+  /** Runner-up's DLS club name. */
+  runner_up_team: string;
+  /** Prize actually owed to the champion, in pesewas. */
+  champion_prize: number;
+  /** Prize actually owed to the runner-up, in pesewas. */
+  runner_up_prize: number;
+}

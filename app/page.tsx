@@ -342,11 +342,17 @@ export default async function HomePage() {
         )}
       </section>
 
-      {/* ============ PLAYER LINKS (group + knockout pages) ============== */}
+      {/* ============ PLAYER LINKS (match centre) ============== */}
       <section aria-labelledby="links-heading" className="space-y-3">
         <h2 id="links-heading" className="text-lg font-bold text-white">
           Match Centre
         </h2>
+        <Link
+          href={`/my-matches`}
+          className="btn-secondary"
+        >
+          My matches &amp; results
+        </Link>
         <Link href={`/groups/${tournament.id}`} className="btn-secondary">
           Group standings &amp; fixtures
         </Link>
@@ -358,6 +364,9 @@ export default async function HomePage() {
           className="btn-secondary"
         >
           Submit a match result
+        </Link>
+        <Link href="/champions" className="btn-secondary">
+          Champions Hall 🏆
         </Link>
         <p className="text-xs text-slate-500">
           Standings and the bracket update automatically after every confirmed
