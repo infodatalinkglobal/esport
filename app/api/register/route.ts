@@ -27,6 +27,7 @@ import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { validateRegistration } from '@/lib/validation';
 import { buildReference } from '@/lib/paystack';
 import { formatCedis } from '@/lib/calculations';
+import { isSupportedPlayerCount, MIN_PLAYERS, MAX_PLAYERS } from '@/lib/draw-rules';
 
 /** Always run on the server, never cached. */
 export const dynamic = 'force-dynamic';
@@ -79,6 +80,22 @@ export async function POST(request: Request) {
       return jsonError('Registration is now closed', 409, {
         code: 'deadline_passed',
       });
+    }
+
+    // The knockout stage needs 2 or 4 groups; a tournament sized for 9–12
+    // players would draw 3 groups and could not be bracketed, and fewer than
+    // MIN_PLAYERS (or more than MAX_PLAYERS) cannot be drawn at all. Refuse
+    // these sizes at registration so the tournament can never reach a state
+    // its own rules cannot finish.
+    if (!isSupportedPlayerCount(tournament.max_players)) {
+      console.error(
+        `[register] tournament ${tournament.id} has unsupported max_players=${tournament.max_players} (allowed: ${MIN_PLAYERS}-8 or 13-${MAX_PLAYERS})`,
+      );
+      return jsonError(
+        'This tournament is misconfigured — contact the organizer on WhatsApp.',
+        409,
+        { code: 'bad_format' },
+      );
     }
 
     // --- 3. Capacity check -------------------------------------------------

@@ -140,14 +140,19 @@ export async function ensureGroupDraw(
     return emptyOutcome('not_configured');
   }
 
-  const running = inFlight.get(tournamentId);
+  // Keyed by tournament AND mode: an organizer's early draw must not be
+  // shadowed by a concurrent automatic one (or vice versa). The database lock
+  // in runDraw() still makes overlapping attempts safe across instances.
+  const key = `${tournamentId}:${options.requireFull === false ? 'early' : 'full'}`;
+
+  const running = inFlight.get(key);
   if (running) return running;
 
   const attempt = runDraw(tournamentId, options).finally(() => {
-    inFlight.delete(tournamentId);
+    inFlight.delete(key);
   });
 
-  inFlight.set(tournamentId, attempt);
+  inFlight.set(key, attempt);
   return attempt;
 }
 

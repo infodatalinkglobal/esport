@@ -38,7 +38,38 @@ export type DrawDecision =
   | 'already_drawn'
   | 'not_full'
   | 'not_enough_players'
-  | 'too_many_players';
+  | 'too_many_players'
+  | 'unsupported_format';
+
+/**
+ * How many groups a paid-player count produces (mirrors `getGroupCount()` in
+ * lib/groups.ts, which is the function the draw actually uses).
+ *
+ * The knockout stage crosses groups in PAIRS — A with B, C with D — so the
+ * format only works with 2 or 4 groups. A 3-group tournament (9–12 players,
+ * because the draw makes groups of 4) would silently strand an entire group's
+ * qualifiers with no semifinal to play, so those sizes are refused outright.
+ */
+export function groupsForPlayerCount(playerCount: number): number {
+  if (playerCount <= 0) return 0;
+  return Math.min(4, Math.max(1, Math.ceil(playerCount / 4)));
+}
+
+/**
+ * True when a player count produces a tournament the knockout stage can finish:
+ * 6–8 paid players (2 groups) or 13–16 (4 groups). Used by the draw rules, the
+ * registration route (so a mis-sized tournament can never fill up) and the
+ * homepage warning.
+ *
+ * @param playerCount Paid players at draw time, or a tournament's `max_players`.
+ * @returns True when the format is playable end to end.
+ */
+export function isSupportedPlayerCount(playerCount: number): boolean {
+  if (!Number.isInteger(playerCount)) return false;
+  if (playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) return false;
+  const groups = groupsForPlayerCount(playerCount);
+  return groups === 2 || groups === 4;
+}
 
 /**
  * Decides whether the group draw should run.
@@ -78,6 +109,9 @@ export function drawDecision(input: {
   if (LOCKED_STATUSES.includes(input.status ?? '')) return 'already_drawn';
   if (input.paidPlayers < MIN_PLAYERS) return 'not_enough_players';
   if (input.paidPlayers > MAX_PLAYERS) return 'too_many_players';
+  // 9–12 paid players would draw 3 groups, which the knockout stage cannot
+  // bracket (it crosses groups in pairs) — refusing beats stranding a group.
+  if (!isSupportedPlayerCount(input.paidPlayers)) return 'unsupported_format';
   if ((input.requireFull ?? true) && input.paidPlayers < input.maxPlayers) {
     return 'not_full';
   }
