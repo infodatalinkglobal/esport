@@ -126,6 +126,14 @@ export async function POST(request: Request) {
           409,
         );
 
+      case 'unsupported_format':
+        // 9–12 players would draw 3 groups, and the knockout stage crosses
+        // groups in pairs — a whole group would be stranded with no semifinal.
+        return jsonError(
+          `${outcome.paid_players} paid players would draw 3 groups, which the knockout stage cannot bracket. Allowed sizes: ${MIN_PLAYERS}-8 players (2 groups) or 13-${MAX_PLAYERS} players (4 groups). Adjust the tournament or the payments before drawing.`,
+          409,
+        );
+
       default:
         return jsonError(
           FAILURE_MESSAGES[outcome.error_step ?? ''] ??

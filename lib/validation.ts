@@ -23,6 +23,9 @@ const MAX_TEXT_LENGTH = 60;
 /** Highest score that can be entered for a match (guards typos like 300). */
 const MAX_SCORE = 99;
 
+/** Longest screenshot URL we accept (a Storage public URL is ~150 chars). */
+const MAX_SCREENSHOT_URL_LENGTH = 500;
+
 /**
  * Result of a validation pass.
  * `ok: false` always carries a message that can be shown to the player as-is.
@@ -44,14 +47,54 @@ function clean(value: unknown): string {
 /**
  * Converts an unknown value into a valid match score.
  *
+ * Only real numbers and non-empty numeric strings count: `Number('')` is 0,
+ * so without the emptiness check a blank field would silently become a 0–0
+ * result — which could then "agree" with another blank submission.
+ *
  * @param value The raw score (number or numeric string).
  * @returns The score as an integer 0-99, or null when it is not valid.
  */
 function toScore(value: unknown): number | null {
-  const number = typeof value === 'number' ? value : Number(value);
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value) || value < 0 || value > MAX_SCORE) return null;
+    return value;
+  }
 
-  if (!Number.isInteger(number) || number < 0 || number > MAX_SCORE) return null;
-  return number;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return null;
+    const number = Number(trimmed);
+    if (!Number.isInteger(number) || number < 0 || number > MAX_SCORE) {
+      return null;
+    }
+    return number;
+  }
+
+  return null;
+}
+
+/**
+ * Checks a screenshot URL submitted with a result.
+ *
+ * The URL is stored as the "proof" of the result, so it must at least look
+ * like one: a bounded-length https URL. (Uploads themselves are constrained
+ * further by the storage bucket's policy.)
+ *
+ * @param value The raw screenshot_url from a request body.
+ * @returns True when the value is a plausible https URL.
+ */
+export function isValidScreenshotUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_SCREENSHOT_URL_LENGTH) {
+    return false;
+  }
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'https:' && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -188,6 +231,13 @@ export function validateGroupResult(
       error: 'Screenshot is required as proof of your result.',
     };
   }
+  if (!isValidScreenshotUrl(screenshot)) {
+    return {
+      ok: false,
+      error:
+        'We could not accept that screenshot link. Please upload the image again.',
+    };
+  }
 
   return {
     ok: true,
@@ -243,6 +293,13 @@ export function validateKnockoutResult(
     return {
       ok: false,
       error: 'Screenshot is required as proof of your result.',
+    };
+  }
+  if (!isValidScreenshotUrl(screenshot)) {
+    return {
+      ok: false,
+      error:
+        'We could not accept that screenshot link. Please upload the image again.',
     };
   }
 

@@ -56,9 +56,18 @@ export async function POST(request: Request) {
   // idempotent verification path as the browser callback.
   const result = await verifyPayment(reference);
   if (!result.success) {
-    console.error('[paystack.webhook] verification failed', reference, result.error);
-    // A non-2xx response asks Paystack to retry delivery.
-    return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
+    console.error('[paystack.webhook] verification failed', reference, result.code, result.error);
+    // Transient problems (could not reach Paystack, database write failed) get
+    // a non-2xx response so Paystack retries the delivery. Permanent ones
+    // (unknown reference, wrong amount, tournament already full) will never
+    // succeed on retry, so the delivery is accepted with a loud log — the
+    // organizer works the case through support/refunds instead.
+    const transient =
+      result.code === 'verification_failed' || result.code === 'update_failed';
+    if (transient) {
+      return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
+    }
+    return NextResponse.json({ received: true, verification: result.code });
   }
 
   // If that payment filled the tournament, draw the groups now (lib/draw.ts).

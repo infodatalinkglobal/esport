@@ -7,6 +7,7 @@
  * 2. The admin endpoints are always protected by the `x-admin-secret` header.
  */
 
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 /**
@@ -81,8 +82,14 @@ export function isAdminRequest(request: Request): boolean {
     request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
     '';
 
-  // Constant-ish comparison; both values are short so timing risk is negligible.
-  return provided.length === expected.length && provided === expected;
+  // Compare SHA-256 digests with timingSafeEqual: fixed-length, constant-time,
+  // and hashing first means a length difference leaks nothing either.
+  const providedHash = createHash('sha256').update(provided).digest();
+  const expectedHash = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(
+    new Uint8Array(providedHash),
+    new Uint8Array(expectedHash),
+  );
 }
 
 /**

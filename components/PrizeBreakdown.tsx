@@ -8,7 +8,7 @@
  */
 
 import type { PrizeBreakdownProps } from '@/types';
-import { formatCedis } from '@/lib/calculations';
+import { formatCedis, ORGANIZER_CUT_PERCENT } from '@/lib/calculations';
 
 /**
  * Renders the prize pool, the two prizes, and the supporting maths.
@@ -62,7 +62,7 @@ export default function PrizeBreakdown({
           <span className="tabular-nums">{formatCedis(prizes.totalPot)}</span>
         </div>
         <div className="flex justify-between gap-3">
-          <span>Organizer cut (15%)</span>
+          <span>Organizer cut ({ORGANIZER_CUT_PERCENT}%)</span>
           <span className="tabular-nums">
             {formatCedis(prizes.organizerShare)}
           </span>

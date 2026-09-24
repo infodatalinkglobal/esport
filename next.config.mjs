@@ -19,6 +19,28 @@ const nextConfig = {
   poweredByHeader: false,
   // Every page reads live tournament data, so nothing is cached at build time.
   // (Individual pages also opt out with `export const dynamic = 'force-dynamic'`.)
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          // Nothing on this site has a reason to be framed elsewhere.
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
+          // Previews and localhost are http; real deployments are https only.
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

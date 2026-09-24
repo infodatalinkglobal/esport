@@ -434,17 +434,27 @@ export async function checkAndResolveMatch(
 
     if (firstClaim === secondClaimWinnerId) {
       // Both players agree: confirm the result and move the winner on.
+      // Guarded on the match still being pending, so an organizer fixing the
+      // row at the same moment can never be clobbered.
       updates.status = 'completed';
       updates.winner_id = firstClaim;
 
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from('brackets')
         .update(updates)
-        .eq('id', match.id);
+        .eq('id', match.id)
+        .eq('status', 'pending')
+        .select('id');
 
       if (error) {
         console.error('[bracket.checkAndResolveMatch] update failed', error.message);
         return { ...undecided, bothSubmitted: true };
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        // Resolved by someone else between our read and write — report the row
+        // as it stands now instead of pretending we decided it.
+        return currentMatchResolution(supabase, match.id);
       }
 
       await advanceWinner(match, firstClaim);
@@ -462,14 +472,20 @@ export async function checkAndResolveMatch(
     updates.status = 'disputed';
     updates.winner_id = null;
 
-    const { error } = await supabase
+    const { data: updatedRows, error } = await supabase
       .from('brackets')
       .update(updates)
-      .eq('id', match.id);
+      .eq('id', match.id)
+      .eq('status', 'pending')
+      .select('id');
 
     if (error) {
       console.error('[bracket.checkAndResolveMatch] update failed', error.message);
       return { ...undecided, bothSubmitted: true };
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      return currentMatchResolution(supabase, match.id);
     }
 
     return {
@@ -483,6 +499,36 @@ export async function checkAndResolveMatch(
     console.error('[bracket.checkAndResolveMatch]', error);
     return undecided;
   }
+}
+
+/**
+ * Re-reads a knockout match and reports its current state — used when a
+ * conditional resolution write found the match already decided by someone else.
+ *
+ * @param supabase Service-role client.
+ * @param matchId The `brackets.id` to re-read.
+ * @returns A resolution describing the match as it stands.
+ */
+async function currentMatchResolution(
+  supabase: ReturnType<typeof supabaseAdmin>,
+  matchId: string,
+): Promise<KnockoutResolution> {
+  const { data: row } = await supabase
+    .from('brackets')
+    .select('status, winner_id')
+    .eq('id', matchId)
+    .maybeSingle();
+
+  const current = row as Pick<Bracket, 'status' | 'winner_id'> | null;
+
+  return {
+    bothSubmitted: true,
+    status: (current?.status as MatchStatus) ?? 'pending',
+    confirmed: current?.status === 'completed',
+    disputed: current?.status === 'disputed',
+    winner_id:
+      current?.status === 'completed' ? (current.winner_id ?? null) : null,
+  };
 }
 
 /**

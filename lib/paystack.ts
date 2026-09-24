@@ -144,32 +144,64 @@ export async function initializePayment(params: {
 }
 
 /**
- * Verifies a transaction with Paystack and, if it really succeeded, marks the
- * matching registration as `paid`.
- *
- * This is the only place where money turns into a confirmed registration, so it
- * is used by `/api/verify-payment` and by the `/payment/verify` callback page.
- *
- * @param reference The Paystack reference to verify.
- * @param supabase Optional service-role client (created on demand when omitted).
- * @returns `{ success, player_name, tournament_id }`; `success` is false with a
- *          user-safe `error` when the payment did not go through.
+ * Paystack transaction statuses that can never become 'success' later.
+ * Only these may flip a registration to 'failed' — 'ongoing'/'pending' mean
+ * the MoMo prompt is still in flight, and treating them as failures used to
+ * mark paying players as failed while their money was mid-flight.
  */
-export async function verifyPayment(
-  reference: string,
-  supabase?: SupabaseClient,
-): Promise<{
+const TERMINAL_FAILURE_STATUSES = new Set(['failed', 'abandoned', 'reversed']);
+
+/**
+ * Why `verifyPayment()` did not confirm a payment. Callers use the code to
+ * decide between "show the player a message", "return 500 so Paystack retries"
+ * and "log and accept the delivery".
+ */
+export type VerifyFailureCode =
+  | 'not_configured'
+  | 'not_found'
+  | 'lookup_failed'
+  | 'verification_failed'
+  | 'still_pending'
+  | 'payment_failed'
+  | 'amount_mismatch'
+  | 'update_failed'
+  | 'tournament_full';
+
+export interface VerifyPaymentResult {
   success: boolean;
   player_name: string;
   tournament_id?: string;
   error?: string;
-}> {
+  /** Machine-readable reason when `success` is false (see VerifyFailureCode). */
+  code?: VerifyFailureCode;
+}
+
+/**
+ * Verifies a transaction with Paystack and, if it really succeeded, marks the
+ * matching registration as `paid` — through the atomic, capacity-checked
+ * `mark_registration_paid()` database function, so a full tournament can never
+ * be oversold by two payments confirming at the same instant.
+ *
+ * This is the only place where money turns into a confirmed registration, so it
+ * is used by `/api/verify-payment`, the `/payment/verify` callback page and the
+ * signed webhook.
+ *
+ * @param reference The Paystack reference to verify.
+ * @param supabase Optional service-role client (created on demand when omitted).
+ * @returns {@link VerifyPaymentResult}; `success` is false with a user-safe
+ *          `error` and a machine-readable `code` when it did not confirm.
+ */
+export async function verifyPayment(
+  reference: string,
+  supabase?: SupabaseClient,
+): Promise<VerifyPaymentResult> {
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   if (!secretKey) {
     return {
       success: false,
       player_name: '',
       error: 'Payments are not configured yet. Please contact us on WhatsApp.',
+      code: 'not_configured',
     };
   }
 
@@ -195,6 +227,7 @@ export async function verifyPayment(
         success: false,
         player_name: '',
         error: 'We could not find that payment. Please contact us on WhatsApp.',
+        code: 'not_found',
       };
     }
 
@@ -204,6 +237,7 @@ export async function verifyPayment(
       success: false,
       player_name: '',
       error: 'We could not reach the payment provider. Please try again.',
+      code: 'verification_failed',
     };
   }
 
@@ -229,6 +263,7 @@ export async function verifyPayment(
       player_name: '',
       error:
         'Payment received but we could not update your registration. Contact us on WhatsApp.',
+      code: 'lookup_failed',
     };
   }
 
@@ -254,24 +289,41 @@ export async function verifyPayment(
       player_name: '',
       error:
         'We could not match that payment to a registration. Contact us on WhatsApp.',
+      code: 'not_found',
     };
   }
 
-  // 4. Paystack says the payment did not succeed.
+  // 4. Paystack says the payment has not succeeded (yet).
   if (data.status !== 'success') {
-    // Record the failure so the player can register again — the phone-number
-    // slot is freed up because the unique index only applies per tournament.
-    await client
-      .from('registrations')
-      .update({ payment_status: 'failed' })
-      .eq('id', registration.id);
+    if (TERMINAL_FAILURE_STATUSES.has(data.status)) {
+      // Genuinely dead — record the failure so the player can register again;
+      // the phone-number slot is freed up because the unique index applies per
+      // tournament only.
+      await client
+        .from('registrations')
+        .update({ payment_status: 'failed' })
+        .eq('id', registration.id);
 
+      return {
+        success: false,
+        player_name: registration.player_name,
+        tournament_id: registration.tournament_id,
+        error:
+          'That payment did not go through. You can try again, or contact us on WhatsApp.',
+        code: 'payment_failed',
+      };
+    }
+
+    // 'ongoing' / 'pending' / anything still in flight: the MoMo prompt may
+    // still be on the player's phone. Never mark 'failed' here — the signed
+    // webhook will confirm the payment the moment it lands.
     return {
       success: false,
       player_name: registration.player_name,
       tournament_id: registration.tournament_id,
       error:
-        'That payment did not go through. You can try again, or contact us on WhatsApp.',
+        'Your payment is still being confirmed. Give it a minute, then check again — do not pay twice.',
+      code: 'still_pending',
     };
   }
 
@@ -279,7 +331,7 @@ export async function verifyPayment(
   // a successful but cheaper/different-currency transaction being credited.
   const { data: tournament, error: tournamentError } = await client
     .from('tournaments')
-    .select('entry_fee')
+    .select('entry_fee, max_players')
     .eq('id', registration.tournament_id)
     .maybeSingle();
 
@@ -299,6 +351,7 @@ export async function verifyPayment(
       player_name: registration.player_name,
       tournament_id: registration.tournament_id,
       error: 'The payment details do not match this tournament. Contact us on WhatsApp.',
+      code: 'amount_mismatch',
     };
   }
 
@@ -311,27 +364,111 @@ export async function verifyPayment(
     };
   }
 
-  // 6. Mark it paid (keep the verified reference so support can trace it).
-  const { error: updateError } = await client
-    .from('registrations')
-    .update({ payment_status: 'paid', paystack_reference: data.reference })
-    .eq('id', registration.id);
+  // 6. Claim the slot — atomically and capacity-checked. The database function
+  //    locks the tournament row while it counts paid players, so two payments
+  //    confirming at the same instant can never oversell a full tournament.
+  //    It returns false when the tournament is full: the money is real, but the
+  //    row must stay unpaid so the organizer can refund.
+  const claimed = await client.rpc('mark_registration_paid', {
+    p_registration_id: registration.id,
+    p_reference: data.reference,
+  });
 
-  if (updateError) {
-    console.error('[paystack.verify] update failed', updateError.message);
+  if (!claimed.error) {
+    if (claimed.data === true) {
+      return {
+        success: true,
+        player_name: registration.player_name,
+        tournament_id: registration.tournament_id,
+      };
+    }
+
+    console.error('[paystack.verify] tournament full — payment not credited', {
+      reference,
+      registration_id: registration.id,
+    });
     return {
       success: false,
       player_name: registration.player_name,
       tournament_id: registration.tournament_id,
       error:
-        'Payment received but we could not confirm it. Contact us on WhatsApp.',
+        'Payment received, but the last slot was just taken. We will refund you — please contact us on WhatsApp.',
+      code: 'tournament_full',
     };
   }
 
+  // 7. Fallback for databases that have not run the hardening migration yet:
+  //    count first, then a conditional update. Not perfectly atomic, but far
+  //    better than an unconditional write, and it keeps verification working.
+  const isMissingFunction =
+    claimed.error.code === 'PGRST202' ||
+    /function .* does not exist/i.test(claimed.error.message ?? '');
+
+  if (isMissingFunction) {
+    console.warn(
+      '[paystack.verify] mark_registration_paid() missing — run the 20260924000000 hardening migration for full oversell protection',
+    );
+
+    const { count: paidNow } = await client
+      .from('registrations')
+      .select('id', { count: 'exact', head: true })
+      .eq('tournament_id', registration.tournament_id)
+      .eq('payment_status', 'paid');
+
+    if ((paidNow ?? 0) >= (tournament.max_players ?? 0)) {
+      return {
+        success: false,
+        player_name: registration.player_name,
+        tournament_id: registration.tournament_id,
+        error:
+          'Payment received, but the last slot was just taken. We will refund you — please contact us on WhatsApp.',
+        code: 'tournament_full',
+      };
+    }
+
+    const { data: updatedRows, error: updateError } = await client
+      .from('registrations')
+      .update({ payment_status: 'paid', paystack_reference: data.reference })
+      .eq('id', registration.id)
+      .neq('payment_status', 'paid')
+      .select('id');
+
+    if (updateError) {
+      console.error('[paystack.verify] update failed', updateError.message);
+      return {
+        success: false,
+        player_name: registration.player_name,
+        tournament_id: registration.tournament_id,
+        error:
+          'Payment received but we could not confirm it. Contact us on WhatsApp.',
+        code: 'update_failed',
+      };
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      // Someone else confirmed this registration between our read and write.
+      return {
+        success: true,
+        player_name: registration.player_name,
+        tournament_id: registration.tournament_id,
+      };
+    }
+
+    return {
+      success: true,
+      player_name: registration.player_name,
+      tournament_id: registration.tournament_id,
+    };
+  }
+
+  console.error('[paystack.verify] claim failed', claimed.error.message);
   return {
-    success: true,
+    success: false,
     player_name: registration.player_name,
     tournament_id: registration.tournament_id,
+    error:
+      'Payment received but we could not confirm it. Contact us on WhatsApp.',
+    code: 'update_failed',
   };
 }
 

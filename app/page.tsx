@@ -21,8 +21,10 @@ import RegistrationForm from '@/components/RegistrationForm';
 import { calculatePrizes, formatCedis } from '@/lib/calculations';
 import { formatDateTime } from '@/lib/format';
 import { getActiveTournamentWithStatus, getRegistrationCounts } from '@/lib/data';
-import { ensureGroupDraw } from '@/lib/draw';
+import { ensureGroupDraw, MAX_PLAYERS, MIN_PLAYERS } from '@/lib/draw';
+import { isSupportedPlayerCount } from '@/lib/draw-rules';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import { whatsappLink } from '@/lib/format';
 
 /** Player counts and deadlines change constantly — never cache this page or its data. */
 export const dynamic = 'force-dynamic';
@@ -172,9 +174,15 @@ export default async function HomePage() {
   const isOpen = tournament.status === 'open' && !deadlinePassed;
   const isFull = counts.paid >= tournament.max_players;
 
+  // The knockout stage can only bracket 2 or 4 groups (6–8 or 13–16 players).
+  // A tournament sized for 9–12 players would strand a whole group with no
+  // semifinal, so it is refused at registration — here we warn instead of
+  // pretending everything is fine.
+  const sizeSupported = isSupportedPlayerCount(tournament.max_players);
+
   // --------------------------------------------- automatic group draw
   // A full tournament must never sit waiting for someone to remember the admin
-  // call. Payments draw the groups themselves (see lib/paystack.ts), and this
+  // call. Payments draw the groups themselves (see lib/draw.ts), and this
   // is the safety net for everything else: a tournament that filled up before
   // that existed, or one whose draw died half-way. The next fresh request for
   // this page finishes the job.
@@ -190,7 +198,7 @@ export default async function HomePage() {
   const knockoutsStarted =
     tournament.status === 'bracket_drawn' || tournament.status === 'completed';
 
-  if (isFull && !knockoutsStarted) {
+  if (isFull && sizeSupported && !knockoutsStarted) {
     const outcome = await ensureGroupDraw(tournament.id);
     if (outcome.drawn) {
       console.log(
@@ -300,20 +308,51 @@ export default async function HomePage() {
         <h2 id="register-heading" className="text-lg font-bold text-white">
           Register for {tournament.title}
         </h2>
-        <RegistrationForm
-          tournamentId={tournament.id}
-          entryFeeLabel={formatCedis(tournament.entry_fee)}
-          isOpen={isOpen}
-          isFull={isFull}
-          spotsLeft={spotsLeft}
-        />
+        {sizeSupported ? (
+          <RegistrationForm
+            tournamentId={tournament.id}
+            entryFeeLabel={formatCedis(tournament.entry_fee)}
+            isOpen={isOpen}
+            isFull={isFull}
+            spotsLeft={spotsLeft}
+          />
+        ) : (
+          <div className="card border-amber-500/40 bg-amber-500/10">
+            <h3 className="text-base font-semibold text-amber-200">
+              This tournament&rsquo;s size needs fixing
+            </h3>
+            <p className="mt-1 text-sm text-amber-100">
+              It is set up for {tournament.max_players} players, but the
+              knockout bracket only works with {MIN_PLAYERS}&ndash;8 players (2
+              groups) or 13&ndash;{MAX_PLAYERS} players (4 groups). Registration
+              is paused until the organizer adjusts the tournament.
+            </p>
+            <a
+              href={whatsappLink(
+                undefined,
+                'Hi! The tournament size looks misconfigured — could you check it?',
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary mt-3"
+            >
+              Contact organizer on WhatsApp
+            </a>
+          </div>
+        )}
       </section>
 
-      {/* ============ PLAYER LINKS (group + knockout pages) ============== */}
+      {/* ============ PLAYER LINKS (match centre) ============== */}
       <section aria-labelledby="links-heading" className="space-y-3">
         <h2 id="links-heading" className="text-lg font-bold text-white">
           Match Centre
         </h2>
+        <Link
+          href={`/my-matches`}
+          className="btn-secondary"
+        >
+          My matches &amp; results
+        </Link>
         <Link href={`/groups/${tournament.id}`} className="btn-secondary">
           Group standings &amp; fixtures
         </Link>
@@ -325,6 +364,9 @@ export default async function HomePage() {
           className="btn-secondary"
         >
           Submit a match result
+        </Link>
+        <Link href="/champions" className="btn-secondary">
+          Champions Hall 🏆
         </Link>
         <p className="text-xs text-slate-500">
           Standings and the bracket update automatically after every confirmed

@@ -17,11 +17,14 @@
 -- What this file creates:
 --   1. The 7 tables of the platform (tournaments + all Module 2 & 3 tables, so
 --      the schema is complete before you start building)
---   2. Indexes on the columns the app actually queries
---   3. Row Level Security (RLS) policies: the public may READ public data and
---      INSERT a registration, and may never update or delete anything
---   4. A public Storage bucket for match screenshots (used from Module 2)
---   5. One starter tournament row (GH₵10 entry, 8 players max)
+--   2. `mark_registration_paid()` — the atomic, capacity-checked function the
+--      server uses to turn a verified Paystack payment into a 'paid' slot
+--   3. Indexes on the columns the app actually queries
+--   4. Row Level Security (RLS) policies: the public may READ public data and
+--      INSERT a pending registration (pending only — never 'paid'), and may
+--      never update or delete anything
+--   5. A public Storage bucket for match screenshots (used from Module 2)
+--   6. One starter tournament row (GH₵10 entry, 8 players max)
 -- =============================================================================
 
 
@@ -196,6 +199,90 @@ create unique index if not exists brackets_unique_match
   on public.brackets (tournament_id, round, match_number);
 
 
+-- ----------------------------------------------------------------------------
+-- 1.8 mark_registration_paid — the ONLY way a registration becomes 'paid'
+-- ----------------------------------------------------------------------------
+-- Called by the server (service role) from `lib/paystack.ts` AFTER Paystack has
+-- independently confirmed the money. It exists so a full tournament can never
+-- be oversold by two payments confirming at the same time:
+--
+--   * `select ... for update` on the registration and then the tournament row
+--     serialises concurrent claims per tournament (the lock is held to commit),
+--   * the paid count is checked against max_players under that lock,
+--   * marking 'paid' and storing the verified reference happens in the same
+--     transaction.
+--
+-- Returns:
+--   true  → the registration is now 'paid' (or already was — idempotent)
+--   false → the tournament is full; the row was left untouched and the caller
+--           must tell the player their money will be refunded.
+--
+-- SECURITY: this function bypasses RLS (security definer), so it must never be
+-- callable by the public. It is locked down to the service role immediately.
+-- ----------------------------------------------------------------------------
+create or replace function public.mark_registration_paid(
+  p_registration_id uuid,
+  p_reference text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_tournament_id uuid;
+  v_status        text;
+  v_max_players   integer;
+  v_paid          integer;
+begin
+  -- 1. Lock the registration row and see what state it is in.
+  select tournament_id, payment_status
+    into v_tournament_id, v_status
+    from public.registrations
+    where id = p_registration_id
+    for update;
+
+  if not found then
+    return false;
+  end if;
+
+  -- 2. Already verified earlier — idempotent, nothing left to do.
+  if v_status = 'paid' then
+    return true;
+  end if;
+
+  -- 3. Lock the tournament and enforce the cap. Every payment claim for one
+  --    tournament queues on this row lock, so exactly max_players rows can
+  --    ever end up 'paid'.
+  select max_players
+    into v_max_players
+    from public.tournaments
+    where id = v_tournament_id
+    for update;
+
+  select count(*) into v_paid
+    from public.registrations
+    where tournament_id = v_tournament_id
+      and payment_status = 'paid';
+
+  if v_paid >= coalesce(v_max_players, 0) then
+    return false;
+  end if;
+
+  -- 4. Claim the slot.
+  update public.registrations
+    set payment_status = 'paid',
+        paystack_reference = p_reference
+    where id = p_registration_id;
+
+  return true;
+end;
+$$;
+
+revoke execute on function public.mark_registration_paid(uuid, text) from anon, authenticated;
+grant execute on function public.mark_registration_paid(uuid, text) to service_role;
+
+
 -- =============================================================================
 -- 2. INDEXES — the columns the app filters on every page load
 -- =============================================================================
@@ -242,31 +329,34 @@ create policy "Public can read tournaments"
 -- ----------------------------------------------------------------------------
 -- registrations: public INSERT only — no public read, ever.
 -- Phone numbers, MoMo numbers and Paystack references stay private.
+--
+-- The check is the security boundary, so it is deliberately strict:
+--   1. payment_status must be 'pending' — an anonymous caller must never be
+--      able to insert themselves as 'paid' and skip Paystack (with a plain
+--      `check (true)` the anon key could do exactly that). Only the server,
+--      through Paystack verification (see mark_registration_paid below),
+--      can set 'paid'.
+--   2. the tournament must exist, be 'open' and inside its deadline — the
+--      same rule /api/register enforces in the app.
 -- ----------------------------------------------------------------------------
 drop policy if exists "Public can insert registrations" on public.registrations;
 create policy "Public can insert registrations"
   on public.registrations for insert
-  with check (true);
+  with check (
+    payment_status = 'pending'
+    and exists (
+      select 1 from public.tournaments t
+      where t.id = tournament_id
+        and t.status = 'open'
+        and t.registration_deadline > now()
+    )
+  );
 
--- OPTIONAL HARDENING (recommended once you are live): stop anyone from
--- inserting a registration into a closed or full tournament, even if they
--- bypass the app and call the Supabase REST API directly. The app already
--- enforces this in /api/register, so this is a second line of defence.
--- To enable it, uncomment these four lines and run them:
---
--- drop policy if exists "Public can insert registrations" on public.registrations;
--- create policy "Public can insert registrations"
---   on public.registrations for insert
---   with check (
---     exists (
---       select 1 from public.tournaments t
---       where t.id = tournament_id
---         and t.status = 'open'
---         and t.registration_deadline > now()
---     )
---   );
--- (Note: `/api/register` creates the registration BEFORE payment, so this stays
---  compatible — registration always happens while the tournament is open.)
+-- (The check above is the hardening that used to be optional: payment_status is
+--  forced to 'pending' and the tournament must be open. /api/register creates
+--  the registration BEFORE payment, so this stays compatible — registration
+--  always happens while the tournament is open, and the service-role client
+--  the server uses bypasses RLS entirely.)
 
 -- ----------------------------------------------------------------------------
 -- Everything else: public read only.
@@ -308,7 +398,10 @@ create policy "Public can view screenshots"
   on storage.objects for select
   using (bucket_id = 'result-screenshots');
 
--- Anyone can upload a screenshot: images only, 5MB maximum.
+-- Anyone can upload a screenshot: images only, 5MB maximum, and the storage
+-- path must have the shape the app writes — result-screenshots/<tournament
+-- uuid>/<match uuid>/<name>.<jpg|jpeg|png|webp> — so the bucket cannot be
+-- used as arbitrary anonymous file storage.
 drop policy if exists "Public can upload screenshots" on storage.objects;
 create policy "Public can upload screenshots"
   on storage.objects for insert
@@ -316,6 +409,7 @@ create policy "Public can upload screenshots"
     bucket_id = 'result-screenshots'
     and coalesce(metadata->>'mimetype', '') like 'image/%'
     and coalesce((metadata->>'size')::bigint, 0) between 1 and 5242880
+    and name ~* '^result-screenshots/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-z-]+\.(jpg|jpeg|png|webp)$'
   );
 
 

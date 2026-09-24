@@ -47,6 +47,11 @@ import { isSupabaseConfigured, supabaseAdmin } from '@/lib/supabase';
 import { validateGroupResult, validateKnockoutResult } from '@/lib/validation';
 import { updateStandings } from '@/lib/groups';
 import { checkAndResolveMatch } from '@/lib/bracket';
+import {
+  compareGroupClaims,
+  completedGroupMatch,
+  groupWinnerId,
+} from '@/lib/result-rules';
 
 /** Always run on the server, never cached. */
 export const dynamic = 'force-dynamic';
@@ -158,99 +163,225 @@ export async function POST(request: Request) {
       );
     }
 
-    // --- 6. Work out whether the two claims agree ------------------------
-    const opponentHasSubmitted =
-      side === 'a'
-        ? Boolean(match.player_b_screenshot)
-        : Boolean(match.player_a_screenshot);
+    // --- 6. Write the submission with guards against concurrent submits -----
+    // Both players finishing their game at the same time is the normal case.
+    // The old read-then-write flow let two simultaneous "first submissions"
+    // overwrite each other's claim and leave the match pending forever, so
+    // every write below is conditional and the flow re-reads on any miss.
+    // Postgres re-evaluates the WHERE after waiting on a concurrent writer's
+    // row lock, so exactly one of two racing writes can land.
+    const myShotColumn = side === 'a' ? 'player_a_screenshot' : 'player_b_screenshot';
+    const opponentShotColumn = side === 'a' ? 'player_b_screenshot' : 'player_a_screenshot';
 
-    // What the stored row would say if this player's claim is the one kept.
     const claimA = side === 'a' ? payload.my_score : payload.opponent_score;
     const claimB = side === 'a' ? payload.opponent_score : payload.my_score;
 
-    const claimsAgree =
-      opponentHasSubmitted &&
-      match.player_a_score === claimA &&
-      match.player_b_score === claimB;
+    // Up to two rounds of: try the FIRST-submission write (my screenshot + my
+    // claim, neither player may have submitted yet) — if it misses, re-read and
+    // either resolve as the second submitter or retry once.
+    let current: GroupMatch | null = null;
+    let opponentSubmitted = false;
 
-    // --- 7. Build and save the update ------------------------------------
-    const updates: Record<string, unknown> = {
-      // The scoreline is only ever stored once BOTH players agree (or the
-      // organizer fixes it in the Supabase dashboard), so a disputed match keeps
-      // the first claim and relies on the two screenshots as evidence.
-      status: 'pending',
-    };
+    for (let attempt = 0; attempt < 2 && !opponentSubmitted; attempt += 1) {
+      const firstWrite = await supabase
+        .from('group_matches')
+        .update({
+          [myShotColumn]: payload.screenshot_url,
+          player_a_score: claimA,
+          player_b_score: claimB,
+          status: 'pending',
+        })
+        .eq('id', match.id)
+        .eq('status', 'pending')
+        .is(myShotColumn, null)
+        .is(opponentShotColumn, null)
+        .select('id');
 
-    if (side === 'a') {
-      updates.player_a_screenshot = payload.screenshot_url;
-    } else {
-      updates.player_b_screenshot = payload.screenshot_url;
-    }
-
-    let confirmed = false;
-    let disputed = false;
-    let winnerId: string | null = null;
-
-    if (opponentHasSubmitted) {
-      if (claimsAgree) {
-        confirmed = true;
-        winnerId =
-          claimA === claimB
-            ? null
-            : claimA > claimB
-              ? match.player_a_id
-              : match.player_b_id;
-
-        updates.status = 'completed';
-        updates.player_a_score = claimA;
-        updates.player_b_score = claimB;
-        updates.winner_id = winnerId;
-      } else {
-        disputed = true;
-        updates.status = 'disputed';
-        updates.winner_id = null;
+      if (firstWrite.error) {
+        return handleServerError(
+          'submit-result',
+          firstWrite.error,
+          'We could not save your result. Please try again.',
+        );
       }
-    } else {
-      // First submission: record the claim so the opponent's submission can be
-      // compared against it. The match stays 'pending'.
-      updates.player_a_score = claimA;
-      updates.player_b_score = claimB;
+
+      if (firstWrite.data && firstWrite.data.length > 0) {
+        // We are genuinely first — the opponent's submission will be compared
+        // against this claim.
+        return NextResponse.json({
+          success: true,
+          status: 'pending',
+          confirmed: false,
+          disputed: false,
+          winner_id: null,
+          message:
+            'Your result and screenshot are saved. The match is confirmed as soon as your opponent submits the same score.',
+        });
+      }
+
+      // The guarded write missed: the state changed under us. Re-read.
+      const { data: freshRow, error: freshError } = await supabase
+        .from('group_matches')
+        .select('*')
+        .eq('id', match.id)
+        .maybeSingle();
+
+      if (freshError || !freshRow) {
+        return handleServerError(
+          'submit-result',
+          freshError ?? 'match vanished mid-submission',
+          'We could not save your result. Please try again.',
+        );
+      }
+
+      current = freshRow as GroupMatch;
+
+      if (side === 'a' ? current.player_a_screenshot : current.player_b_screenshot) {
+        return jsonError(
+          'You already submitted this result. The organizer will review it if something is wrong.',
+          409,
+        );
+      }
+
+      if (current.status === 'completed') {
+        return jsonError(
+          'This result has already been confirmed. Contact the organizer on WhatsApp if it is wrong.',
+          409,
+        );
+      }
+
+      if (current.status === 'disputed') {
+        return jsonError(
+          'This match is already under review by the organizer (within 24 hours).',
+          409,
+        );
+      }
+
+      opponentSubmitted = Boolean(
+        side === 'a'
+          ? current.player_b_screenshot
+          : current.player_a_screenshot,
+      );
     }
 
-    const { error: updateError } = await supabase
-      .from('group_matches')
-      .update(updates)
-      .eq('id', match.id);
-
-    if (updateError) {
+    if (!current) {
       return handleServerError(
         'submit-result',
-        updateError,
+        'unreachable: submission loop produced no match row',
         'We could not save your result. Please try again.',
       );
     }
 
-    // --- 8. Confirmed → recalculate the league table ---------------------
-    if (confirmed) {
-      await updateStandings({
-        ...match,
-        player_a_score: claimA,
-        player_b_score: claimB,
-        status: 'completed',
-      });
+    if (!opponentSubmitted) {
+      // Two attempts and the match is still untouched — a transient database
+      // condition. A clean retry works.
+      return jsonError(
+        'We could not save your result just now. Please try again in a moment.',
+        503,
+      );
+    }
+
+    // --- 6c. Compare my claim with the stored one and write the outcome,
+    //     guarded on the match still being pending. ---
+    const outcome = compareGroupClaims(
+      claimA,
+      claimB,
+      current.player_a_score,
+      current.player_b_score,
+    );
+
+    if (outcome === 'confirm') {
+      const winnerId = groupWinnerId(
+        claimA,
+        claimB,
+        match.player_a_id,
+        match.player_b_id,
+      );
+
+      const confirmWrite = await supabase
+        .from('group_matches')
+        .update({
+          [myShotColumn]: payload.screenshot_url,
+          player_a_score: claimA,
+          player_b_score: claimB,
+          winner_id: winnerId,
+          status: 'completed',
+        })
+        .eq('id', match.id)
+        .eq('status', 'pending')
+        .select('id');
+
+      if (confirmWrite.error) {
+        return handleServerError(
+          'submit-result',
+          confirmWrite.error,
+          'We could not save your result. Please try again.',
+        );
+      }
+
+      if (confirmWrite.data && confirmWrite.data.length > 0) {
+        // --- 7. Confirmed → recalculate the league table ---
+        await updateStandings(completedGroupMatch(match, claimA, claimB));
+
+        return NextResponse.json({
+          success: true,
+          status: 'completed',
+          confirmed: true,
+          disputed: false,
+          winner_id: winnerId,
+          message:
+            'Both players submitted the same score, so the result is confirmed and the group table has been updated.',
+        });
+      }
+
+      // The match was resolved between our read and write — report reality.
+      const { data: resolvedRow } = await supabase
+        .from('group_matches')
+        .select('status')
+        .eq('id', match.id)
+        .maybeSingle();
+
+      if (resolvedRow?.status === 'completed') {
+        return jsonError(
+          'This result has already been confirmed. Contact the organizer on WhatsApp if it is wrong.',
+          409,
+        );
+      }
+
+      return jsonError(
+        'This match is already under review by the organizer (within 24 hours).',
+        409,
+      );
+    }
+
+    // Conflicting claims → the organizer takes over.
+    const disputeWrite = await supabase
+      .from('group_matches')
+      .update({
+        [myShotColumn]: payload.screenshot_url,
+        status: 'disputed',
+        winner_id: null,
+      })
+      .eq('id', match.id)
+      .eq('status', 'pending')
+      .select('id');
+
+    if (disputeWrite.error) {
+      return handleServerError(
+        'submit-result',
+        disputeWrite.error,
+        'We could not save your result. Please try again.',
+      );
     }
 
     return NextResponse.json({
       success: true,
-      status: disputed ? 'disputed' : confirmed ? 'completed' : 'pending',
-      confirmed,
-      disputed,
-      winner_id: winnerId,
-      message: disputed
-        ? 'The two submissions do not match, so this result is disputed — the organizer will review it within 24 hours.'
-        : confirmed
-          ? 'Both players submitted the same score, so the result is confirmed and the group table has been updated.'
-          : 'Your result and screenshot are saved. The match is confirmed as soon as your opponent submits the same score.',
+      status: 'disputed',
+      confirmed: false,
+      disputed: true,
+      winner_id: null,
+      message:
+        'The two submissions do not match, so this result is disputed — the organizer will review it within 24 hours.',
     });
   } catch (error) {
     return handleServerError(
@@ -355,32 +486,123 @@ async function submitKnockoutResult(
   const claimedWinnerId =
     payload.knockout_result === 'won' ? myId : (opponentId as string);
 
-  const opponentHasSubmitted =
-    side === 'a'
-      ? Boolean(match.player_b_screenshot)
-      : Boolean(match.player_a_screenshot);
+  const myShotColumn = side === 'a' ? 'player_a_screenshot' : 'player_b_screenshot';
+  const opponentShotColumn = side === 'a' ? 'player_b_screenshot' : 'player_a_screenshot';
 
-  const updates: Record<string, unknown> =
-    side === 'a'
-      ? { player_a_screenshot: payload.screenshot_url }
-      : { player_b_screenshot: payload.screenshot_url };
-
-  // First submission: remember the claim privately so the opponent's claim can
-  // be compared against it. The match stays 'pending'.
-  if (!opponentHasSubmitted && !match.winner_id) {
-    updates.winner_id = claimedWinnerId;
-  }
-
-  const { error: updateError } = await supabase
+  // --- First-submission attempt: store my screenshot AND my claim privately.
+  // The guards (no screenshots, no stored claim) make simultaneous submissions
+  // serialise — the old unconditional write let two racing submissions overwrite
+  // the stored claim and manufacture a false dispute. Postgres re-evaluates the
+  // WHERE after waiting on the concurrent writer's lock, so only one lands.
+  const firstWrite = await supabase
     .from('brackets')
-    .update(updates)
-    .eq('id', match.id);
+    .update({
+      [myShotColumn]: payload.screenshot_url,
+      winner_id: claimedWinnerId,
+    })
+    .eq('id', match.id)
+    .eq('status', 'pending')
+    .is('winner_id', null)
+    .is(myShotColumn, null)
+    .is(opponentShotColumn, null)
+    .select('id');
 
-  if (updateError) {
+  if (firstWrite.error) {
     return handleServerError(
       'submit-result(knockout)',
-      updateError,
+      firstWrite.error,
       'We could not save your result. Please try again.',
+    );
+  }
+
+  if (firstWrite.data && firstWrite.data.length > 0) {
+    // We stored the first claim. Nothing to decide yet — the opponent's
+    // submission will be compared against it.
+    return NextResponse.json({
+      success: true,
+      status: 'pending',
+      confirmed: false,
+      disputed: false,
+      winner_id: null,
+      message:
+        'Your result and screenshot are saved. The match is confirmed as soon as your opponent submits the same result.',
+    });
+  }
+
+  // --- The guarded write missed: state changed under us. Re-read. ---------
+  const { data: freshRow, error: freshError } = await supabase
+    .from('brackets')
+    .select('*')
+    .eq('id', match.id)
+    .maybeSingle();
+
+  if (freshError || !freshRow) {
+    return handleServerError(
+      'submit-result(knockout)',
+      freshError ?? 'match vanished mid-submission',
+      'We could not save your result. Please try again.',
+    );
+  }
+
+  const current = freshRow as Bracket;
+
+  if (side === 'a' ? current.player_a_screenshot : current.player_b_screenshot) {
+    return jsonError(
+      'You already submitted this result. The organizer will review it if something is wrong.',
+      409,
+    );
+  }
+
+  if (current.status === 'completed') {
+    return jsonError(
+      'This result has already been confirmed. Contact the organizer on WhatsApp if it is wrong.',
+      409,
+    );
+  }
+
+  if (current.status === 'disputed') {
+    return jsonError(
+      'This match is already under review by the organizer (within 24 hours).',
+      409,
+    );
+  }
+
+  // --- Second-submitter path: store my screenshot (guarded), then let
+  //     checkAndResolveMatch compare my claim with the stored one. ---
+  const secondWrite = await supabase
+    .from('brackets')
+    .update({ [myShotColumn]: payload.screenshot_url })
+    .eq('id', match.id)
+    .eq('status', 'pending')
+    .is(myShotColumn, null)
+    .select('id');
+
+  if (secondWrite.error) {
+    return handleServerError(
+      'submit-result(knockout)',
+      secondWrite.error,
+      'We could not save your result. Please try again.',
+    );
+  }
+
+  if (!secondWrite.data || secondWrite.data.length === 0) {
+    // Resolved between our read and write — report the row as it stands.
+    const { data: resolvedRow } = await supabase
+      .from('brackets')
+      .select('status')
+      .eq('id', match.id)
+      .maybeSingle();
+
+    if (resolvedRow?.status === 'completed') {
+      return jsonError(
+        'This result has already been confirmed. Contact the organizer on WhatsApp if it is wrong.',
+        409,
+      );
+    }
+
+    return jsonError(
+      'This match is already under review by the organizer (within 24 hours).',
+      409,
     );
   }
 

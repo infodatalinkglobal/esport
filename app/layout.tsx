@@ -59,20 +59,26 @@ export default function RootLayout({
           <div className="mx-auto flex max-w-3xl items-center justify-between gap-2 px-4 py-2">
             <Link
               href="/"
-              className="flex min-h-tap items-center text-base font-bold tracking-tight"
+              className="flex min-h-tap items-center whitespace-nowrap text-sm font-bold tracking-tight sm:text-base"
             >
               DLS <span className="ml-1 text-pitch-400">Tournament GH</span>
             </Link>
 
             <nav aria-label="Main navigation">
               <ul className="flex items-center">
-                {/* Module 2 added the result-submission page. The group
-                    standings need a tournament id, so they are linked from the
-                    landing page and the success page instead of the nav. */}
+                {/* My Matches: the player's personal fixtures/results view. */}
+                <li>
+                  <Link
+                    href="/my-matches"
+                    className="flex min-h-tap items-center rounded-lg px-2 text-sm font-medium text-slate-300 active:bg-white/5 sm:px-3"
+                  >
+                    My Matches
+                  </Link>
+                </li>
                 <li>
                   <Link
                     href="/submit-result"
-                    className="flex min-h-tap items-center rounded-lg px-3 text-sm font-medium text-slate-300 active:bg-white/5"
+                    className="flex min-h-tap items-center rounded-lg px-2 text-sm font-medium text-slate-300 active:bg-white/5 sm:px-3"
                   >
                     Submit Result
                   </Link>

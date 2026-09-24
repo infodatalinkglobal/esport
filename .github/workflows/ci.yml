@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  typecheck-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Match the development runtime (Node 22 expands the test globs the
+          # same way; Node 20 does not).
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+        env:
+          # Placeholder values: the build only needs the variables to exist for
+          # the public client bundle; no database is contacted at build time.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY: pk_test_placeholder
+          NEXT_PUBLIC_TOURNAMENT_ENTRY_FEE: '1000'
+          NEXT_PUBLIC_ORGANIZER_CUT_PERCENT: '15'
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
