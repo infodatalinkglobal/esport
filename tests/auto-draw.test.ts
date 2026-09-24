@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Registration } from '../types';
-import { drawDecision, MAX_PLAYERS, MIN_PLAYERS } from '../lib/draw-rules';
+import { drawDecision, groupsForPlayerCount, isSupportedPlayerCount, MAX_PLAYERS, MIN_PLAYERS } from '../lib/draw-rules';
 import { createGroups, generateGroupFixtures } from '../lib/groups';
 
 /** A full tournament, nothing drawn yet — the live "DLS Champions Cup #1" case. */
@@ -24,7 +24,9 @@ const FULL_OPEN = {
 
 test('draws as soon as the last paid registration reaches max_players', () => {
   assert.equal(drawDecision(FULL_OPEN), 'draw');
-  assert.equal(drawDecision({ ...FULL_OPEN, paidPlayers: 10, maxPlayers: 10 }), 'draw');
+  // 16 players → 4 groups, a supported shape (9–12 would be 3 groups and is
+  // refused — see the format-limit tests at the bottom of this file).
+  assert.equal(drawDecision({ ...FULL_OPEN, paidPlayers: 16, maxPlayers: 16 }), 'draw');
 });
 
 test('does not draw while a slot is still unpaid', () => {
@@ -321,4 +323,49 @@ test('a tournament that is not full yet is left alone by the automatic draw', as
   assert.equal(outcome.reason, 'not_full');
   assert.equal(counts(db).groups, 0);
   assert.equal(counts(db).status, 'open');
+});
+
+/* ==========================================================================
+ * Format limits — the knockout stage needs 2 or 4 groups (review finding #2)
+ * ========================================================================== */
+
+test('9–12 paid players are refused: 3 groups cannot be bracketed', () => {
+  for (const paid of [9, 10, 11, 12]) {
+    assert.equal(
+      drawDecision({ ...FULL_OPEN, paidPlayers: paid, maxPlayers: paid }),
+      'unsupported_format',
+      `${paid} players must not draw`,
+    );
+  }
+});
+
+test('6–8 and 13–16 paid players draw: 2 or 4 groups', () => {
+  for (const paid of [6, 7, 8]) {
+    assert.equal(
+      drawDecision({ ...FULL_OPEN, paidPlayers: paid, maxPlayers: paid }),
+      'draw',
+      `${paid} players must draw (2 groups)`,
+    );
+  }
+  for (const paid of [13, 14, 15, 16]) {
+    assert.equal(
+      drawDecision({ ...FULL_OPEN, paidPlayers: paid, maxPlayers: paid }),
+      'draw',
+      `${paid} players must draw (4 groups)`,
+    );
+  }
+});
+
+test('isSupportedPlayerCount matches the draw decision', () => {
+  for (const n of [0, 1, 5, 9, 10, 11, 12, 17, 20]) {
+    assert.equal(isSupportedPlayerCount(n), false, `${n} must be unsupported`);
+  }
+  for (const n of [6, 7, 8, 13, 14, 15, 16]) {
+    assert.equal(isSupportedPlayerCount(n), true, `${n} must be supported`);
+  }
+  // 5 players would be 2 groups but sit below the tournament minimum.
+  assert.equal(groupsForPlayerCount(5), 2);
+  assert.equal(groupsForPlayerCount(9), 3);
+  assert.equal(groupsForPlayerCount(12), 3);
+  assert.equal(groupsForPlayerCount(13), 4);
 });
