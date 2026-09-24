@@ -123,6 +123,8 @@ Scripts: `npm run build`, `npm start`, `npm run typecheck`.
 | Route | What it does |
 | --- | --- |
 | `/` | Hero, tournament card with live player count + countdown, prize pool, registration form, collapsible rules, WhatsApp footer |
+| `/my-matches` | Player dashboard: enter your WhatsApp number → your payment status, group position, every fixture/knockout match from your perspective |
+| `/champions` | Champions Hall — every completed tournament's champion, runner-up and prizes |
 | `/payment/verify` | Shows "Verifying payment…", asks the server to confirm with Paystack, then forwards to the success page |
 | `/payment/success` | ✅ confirmation with player name, tournament, match deadline, WhatsApp group + share buttons |
 | `/groups/[tournamentId]` | Every group's league table + fixtures, top 2 in green, auto-refreshes every 60 seconds |
@@ -373,6 +375,10 @@ semifinal 2) — or just re-trigger the automatic move by setting the match back
 ---
 
 ## 🚀 Deploying to Vercel
+
+> **Shortest correct path:** follow **`GO_LIVE.md`** — the ordered go-live
+> checklist (database → Paystack → Vercel → webhook → test dry run → real
+> money). The section below is the deep reference.
 
 ### 1. Push the code
 
