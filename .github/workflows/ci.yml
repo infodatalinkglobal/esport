@@ -13,7 +13,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Match the development runtime (Node 22 expands the test globs the
+          # same way; Node 20 does not).
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
