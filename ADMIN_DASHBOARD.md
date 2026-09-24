@@ -30,9 +30,13 @@ Supabase dashboard" workaround with a button.
 | Route | Purpose |
 | --- | --- |
 | `/admin` | **Overview** — tournament picker, live stats (paid/total, pending payments, revenue, prize breakdown), group + knockout progress, lifecycle action buttons, recent sign-ups |
-| `/admin/players` | **Players** — searchable table with contact details, payment badges, one-tap **Mark paid** (manual MoMo), WhatsApp nudge links |
-| `/admin/matches` | **Matches** — every group & knockout fixture with scores, screenshots and status filter chips; **set/override a result** to resolve disputes |
+| `/admin/players` | **Players** — searchable table with contact details, payment badges, one-tap **Mark paid** (manual MoMo), **refunds** (Paystack API or manual MoMo), inline **player editing**, the **broadcast composer** (select recipients → copy message + contacts for WhatsApp) and **CSV export** |
+| `/admin/matches` | **Matches** — every group & knockout fixture with scores, screenshots and status filter chips; **set/override a result** to resolve disputes; **CSV export** |
 | `/admin/tournaments` | **Tournaments** — edit the selected tournament (title, deadlines, max players, status) and create the next one |
+
+**Look & feel:** the dashboard wears its own light "back office" skin (white
+cards on slate, green accents) — deliberately different from the player site's
+dark night-match theme, so the two surfaces never read as the same product.
 
 A shared client shell (`components/admin/`) provides the login gate, the tab
 navigation, the tournament picker and the admin API context.
@@ -43,8 +47,9 @@ navigation, the tournament picker and the admin API context.
 | --- | --- | --- |
 | `/api/admin/verify` | POST | Confirms the secret (login) |
 | `/api/admin/overview` | GET | Tournaments + counts + stats + actions for the overview page |
-| `/api/admin/registrations` | GET | Full registration rows for a tournament |
+| `/api/admin/registrations` | GET / PATCH | Full registration rows for a tournament / edit a player's name, team or numbers (phone uniqueness enforced) |
 | `/api/admin/registrations/mark-paid` | POST | Manual MoMo confirmation via the capacity-checked RPC |
+| `/api/admin/registrations/refund` | POST | Refund a player: Paystack's refund API (real transactions) or mark refunded (manual MoMo). Frees the slot |
 | `/api/admin/matches` | GET | Group + knockout matches, decorated with names |
 | `/api/admin/match-result` | POST | Organizer sets/overrides a result; recalculates standings, advances the bracket |
 | `/api/admin/tournaments` | POST / PATCH | Create the next tournament / edit the selected one |
@@ -52,11 +57,20 @@ navigation, the tournament picker and the admin API context.
 | `/api/admin/draw-groups` | POST | *(existing)* draw the groups |
 | `/api/admin/draw-knockout` | POST | *(existing)* draw the semifinals + final |
 
+CSV export and the WhatsApp broadcast composer are client-side on purpose:
+the dashboard already holds the rows, and browsers cannot open a true
+multi-recipient WhatsApp message — so the composer copies the message plus the
+selected contacts for pasting.
+
 ## Guard rails (in `lib/admin-rules.ts`)
 
 - **Status transitions** are an explicit map — e.g. `completed` is a one-way
   door, `open ⇄ closed` is allowed, and `groups_drawn → bracket_drawn` only
   happens through the draw endpoint.
+- **Refunds** only touch `paid` rows in undrawn tournaments, and only mark the
+  row `refunded` after Paystack accepts (or the organizer confirms a manual
+  MoMo refund). A refunded row frees its slot automatically because capacity
+  counts only `paid` rows.
 - **Entry fee** is editable only while the tournament is `open` and nobody has
   paid (money math must never mix two fees).
 - **max_players** must stay a format-supported size (6–8 or 13–16) and can never

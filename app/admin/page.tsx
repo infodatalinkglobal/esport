@@ -134,24 +134,24 @@ export default function AdminOverviewPage() {
 
   if (!selectedId && !loading) {
     return (
-      <div className="card">
-        <h1 className="text-lg font-bold">No tournaments yet</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Create the first one on the <span className="text-slate-200">Tournament</span> tab.
+      <div className="acard">
+        <h1 className="text-lg font-bold text-slate-900">No tournaments yet</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Create the first one on the <span className="text-slate-800">Tournament</span> tab.
         </p>
       </div>
     );
   }
 
   if (loading && !overview) {
-    return <p className="text-sm font-medium text-slate-400">Loading the overview…</p>;
+    return <p className="text-sm font-medium text-slate-500">Loading the overview…</p>;
   }
 
   if (unavailable || !overview) {
     return (
       <div className="flex flex-col gap-3">
         <Banner tone="error">{unavailable ?? 'The overview could not be loaded.'}</Banner>
-        <button type="button" className="btn-secondary max-w-xs" onClick={() => void load()}>
+        <button type="button" className="abtn-secondary max-w-xs" onClick={() => void load()}>
           Try again
         </button>
       </div>
@@ -167,30 +167,30 @@ export default function AdminOverviewPage() {
   return (
     <div className="flex flex-col gap-6">
       {/* --- The tournament's identity card ------------------------------- */}
-      <section className="card flex flex-col gap-3">
+      <section className="acard flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h1 className="text-xl font-extrabold sm:text-2xl">{tournament.title}</h1>
-            <p className="mt-1 text-sm text-slate-400">
+            <h1 className="text-xl font-extrabold text-slate-900 sm:text-2xl">{tournament.title}</h1>
+            <p className="mt-1 text-sm text-slate-600">
               {formatCedis(tournament.entry_fee)} entry · {tournament.max_players} slots ·{' '}
-              <span className="font-semibold text-slate-300">{tournament.status}</span>
+              <span className="font-semibold text-slate-900">{tournament.status}</span>
             </p>
           </div>
           <button
             type="button"
             onClick={() => void load()}
-            className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/5"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
           >
             ↻ Refresh
           </button>
         </div>
-        <dl className="grid grid-cols-1 gap-2 text-sm text-slate-400 sm:grid-cols-2">
+        <dl className="grid grid-cols-1 gap-2 text-sm text-slate-600 sm:grid-cols-2">
           <div>
-            <dt className="inline font-medium text-slate-300">Registration closes: </dt>
+            <dt className="inline font-medium text-slate-700">Registration closes: </dt>
             <dd className="inline">{formatDateTime(tournament.registration_deadline)}</dd>
           </div>
           <div>
-            <dt className="inline font-medium text-slate-300">Matches due by: </dt>
+            <dt className="inline font-medium text-slate-700">Matches due by: </dt>
             <dd className="inline">{formatDateTime(tournament.match_deadline)}</dd>
           </div>
         </dl>
@@ -200,7 +200,7 @@ export default function AdminOverviewPage() {
 
       {/* --- The money ------------------------------------------------------ */}
       <section aria-labelledby="stats-heading">
-        <h2 id="stats-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-400">
+        <h2 id="stats-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
           Money & players
         </h2>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -210,7 +210,15 @@ export default function AdminOverviewPage() {
             sub={`${fillPercent}% full`}
             accent
           />
-          <StatCard value={payment_counts.pending} label="Awaiting payment" />
+          <StatCard
+            value={payment_counts.pending}
+            label="Awaiting payment"
+            sub={
+              payment_counts.refunded > 0
+                ? `${payment_counts.refunded} refunded`
+                : undefined
+            }
+          />
           <StatCard value={formatCedis(overview.revenue_pesewas)} label="Collected" accent />
           <StatCard
             value={formatCedis(prizes.winnerPrize)}
@@ -222,18 +230,18 @@ export default function AdminOverviewPage() {
 
       {/* --- The football ---------------------------------------------------- */}
       <section aria-labelledby="progress-heading">
-        <h2 id="progress-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-400">
+        <h2 id="progress-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
           Progress
         </h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="card">
-            <p className="text-sm font-semibold text-slate-300">Group stage</p>
-            <p className="mt-1 text-2xl font-extrabold tabular-nums">
+          <div className="acard">
+            <p className="text-sm font-semibold text-slate-700">Group stage</p>
+            <p className="mt-1 text-2xl font-extrabold tabular-nums text-slate-900">
               {group_matches.completed}
               <span className="text-base font-bold text-slate-500">/{group_matches.total} played</span>
             </p>
             <div
-              className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"
+              className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200"
               role="progressbar"
               aria-valuenow={groupDone}
               aria-valuemin={0}
@@ -246,9 +254,9 @@ export default function AdminOverviewPage() {
               {group_matches.disputed} disputed · {group_matches.pending} waiting for results
             </p>
           </div>
-          <div className="card">
-            <p className="text-sm font-semibold text-slate-300">Knockout</p>
-            <p className="mt-1 text-2xl font-extrabold tabular-nums">
+          <div className="acard">
+            <p className="text-sm font-semibold text-slate-700">Knockout</p>
+            <p className="mt-1 text-2xl font-extrabold tabular-nums text-slate-900">
               {knockout_matches.completed}
               <span className="text-base font-bold text-slate-500">/{knockout_matches.total} played</span>
             </p>
@@ -263,7 +271,7 @@ export default function AdminOverviewPage() {
 
       {/* --- The levers -------------------------------------------------------- */}
       <section aria-labelledby="actions-heading">
-        <h2 id="actions-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-400">
+        <h2 id="actions-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
           Tournament actions
         </h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -348,13 +356,13 @@ export default function AdminOverviewPage() {
 
       {/* --- The pulse ----------------------------------------------------------- */}
       <section aria-labelledby="recent-heading">
-        <h2 id="recent-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-400">
+        <h2 id="recent-heading" className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
           Recent registrations
         </h2>
-        <div className="card overflow-x-auto p-0">
+        <div className="acard overflow-x-auto p-0">
           <table className="w-full min-w-[28rem] text-left text-sm">
             <thead>
-              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                 <th scope="col" className="px-4 py-3 font-semibold">Player</th>
                 <th scope="col" className="px-4 py-3 font-semibold">Team</th>
                 <th scope="col" className="px-4 py-3 font-semibold">Payment</th>
@@ -370,13 +378,13 @@ export default function AdminOverviewPage() {
                 </tr>
               ) : (
                 overview.recent_registrations.map((row) => (
-                  <tr key={row.id} className="border-b border-white/5 last:border-0">
-                    <td className="px-4 py-3 font-semibold text-slate-200">{row.player_name}</td>
-                    <td className="px-4 py-3 text-slate-400">{row.dls_team_name}</td>
+                  <tr key={row.id} className="border-b border-slate-100 last:border-0">
+                    <td className="px-4 py-3 font-semibold text-slate-900">{row.player_name}</td>
+                    <td className="px-4 py-3 text-slate-600">{row.dls_team_name}</td>
                     <td className="px-4 py-3">
                       <PaymentBadge status={row.payment_status} />
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-slate-400">{row.registered_at}</td>
+                    <td className="px-4 py-3 tabular-nums text-slate-500">{row.registered_at}</td>
                   </tr>
                 ))
               )}
@@ -384,7 +392,7 @@ export default function AdminOverviewPage() {
           </table>
         </div>
         <p className="mt-2 text-xs text-slate-500">
-          Full list with contacts on the <span className="text-slate-300">Players</span> tab.
+          Full list with contacts on the <span className="text-slate-700">Players</span> tab.
         </p>
       </section>
     </div>

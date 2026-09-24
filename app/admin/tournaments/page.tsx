@@ -80,10 +80,10 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
 function Field({ id, label, locked, children, ...inputProps }: FieldProps) {
   return (
     <div>
-      <label htmlFor={id} className="field-label">
+      <label htmlFor={id} className="afield-label">
         {label}
       </label>
-      <input id={id} className="field" disabled={Boolean(locked)} {...inputProps} />
+      <input id={id} className="afield" disabled={Boolean(locked)} {...inputProps} />
       {children}
       {locked ? <p className="mt-1 text-xs text-slate-500">{locked}</p> : null}
     </div>
@@ -111,7 +111,7 @@ interface CreateFormProps {
  */
 function CreateForm({ draft, onChange, onSubmit, busy }: CreateFormProps) {
   return (
-    <form onSubmit={onSubmit} className="card flex flex-col gap-3">
+    <form onSubmit={onSubmit} className="acard flex flex-col gap-3">
       <Field
         id="new-title"
         label="Title"
@@ -135,12 +135,12 @@ function CreateForm({ draft, onChange, onSubmit, busy }: CreateFormProps) {
           onChange={(event) => onChange({ entry_fee_cedis: event.target.value })}
         />
         <div>
-          <label htmlFor="new-max" className="field-label">
+          <label htmlFor="new-max" className="afield-label">
             Max players
           </label>
           <select
             id="new-max"
-            className="field"
+            className="afield"
             required
             value={draft.max_players}
             onChange={(event) => onChange({ max_players: event.target.value })}
@@ -174,7 +174,7 @@ function CreateForm({ draft, onChange, onSubmit, busy }: CreateFormProps) {
           onChange={(event) => onChange({ match_deadline: event.target.value })}
         />
       </div>
-      <button type="submit" className="btn-primary" disabled={busy}>
+      <button type="submit" className="abtn-primary" disabled={busy}>
         {busy ? 'Creating…' : 'Create tournament'}
       </button>
     </form>
@@ -347,8 +347,8 @@ export default function AdminTournamentsPage() {
     return (
       <div className="flex max-w-xl flex-col gap-4">
         <div>
-          <h1 className="text-xl font-extrabold sm:text-2xl">Create the first tournament</h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <h1 className="text-xl font-extrabold text-slate-900 sm:text-2xl">Create the first tournament</h1>
+          <p className="mt-1 text-sm text-slate-600">
             One row is all the homepage needs to start taking registrations.
           </p>
         </div>
@@ -364,7 +364,7 @@ export default function AdminTournamentsPage() {
   }
 
   if (!tournament) {
-    return <p className="text-sm font-medium text-slate-400">Pick a tournament first.</p>;
+    return <p className="text-sm font-medium text-slate-500">Pick a tournament first.</p>;
   }
 
   return (
@@ -372,19 +372,19 @@ export default function AdminTournamentsPage() {
       {/* --- Edit the selected tournament ---------------------------------- */}
       <section aria-labelledby="edit-heading" className="flex max-w-xl flex-col gap-3">
         <div>
-          <h1 id="edit-heading" className="text-xl font-extrabold sm:text-2xl">
+          <h1 id="edit-heading" className="text-xl font-extrabold text-slate-900 sm:text-2xl">
             Tournament settings
           </h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <p className="mt-1 text-sm text-slate-600">
             {tournament.title} · {formatCedis(tournament.entry_fee)} entry · status{' '}
-            <span className="font-semibold text-slate-300">{tournament.status}</span>
+            <span className="font-semibold text-slate-900">{tournament.status}</span>
           </p>
         </div>
 
         {banner ? <Banner tone={banner.tone}>{banner.text}</Banner> : null}
         {locks.all ? <Banner tone="error">{locks.all}</Banner> : null}
 
-        <form onSubmit={(event) => void saveEdit(event)} className="card flex flex-col gap-3">
+        <form onSubmit={(event) => void saveEdit(event)} className="acard flex flex-col gap-3">
           <Field
             id="edit-title"
             label="Title"
@@ -449,7 +449,7 @@ export default function AdminTournamentsPage() {
           </div>
           <button
             type="submit"
-            className="btn-primary"
+            className="abtn-primary"
             disabled={busy !== null || Boolean(locks.all)}
           >
             {busy === 'patch' ? 'Saving…' : 'Save changes'}
@@ -466,10 +466,10 @@ export default function AdminTournamentsPage() {
       {/* --- Create the next tournament -------------------------------------- */}
       <section aria-labelledby="create-heading" className="flex max-w-xl flex-col gap-3">
         <div>
-          <h2 id="create-heading" className="text-lg font-bold">
+          <h2 id="create-heading" className="text-lg font-bold text-slate-900">
             Start the next tournament
           </h2>
-          <p className="mt-1 text-sm text-slate-400">
+          <p className="mt-1 text-sm text-slate-600">
             The new cup opens immediately and becomes the one the homepage advertises (the newest
             unfinished tournament wins).
           </p>

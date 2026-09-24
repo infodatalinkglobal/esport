@@ -62,8 +62,13 @@ export interface Tournament {
  * `failed` is kept separate from `pending` so a declined/abandoned MoMo payment
  * can be recognised and retried, and so a failed attempt never blocks a phone
  * number from registering again.
+ *
+ * `refunded` (Module 4) marks money the organizer has returned — via Paystack's
+ * refund API or by hand for MoMo paid outside Paystack. A refunded row no
+ * longer counts towards the tournament's paid slots, so the place frees up for
+ * the next player.
  */
-export type PaymentStatus = 'pending' | 'paid' | 'failed';
+export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 
 /** A row of the `registrations` table. */
 export interface Registration {
@@ -780,8 +785,8 @@ export interface AdminOverview {
   tournaments: AdminTournamentSummary[];
   /** The tournament this overview describes. */
   tournament: Tournament;
-  /** Paid / pending / failed registration counts. */
-  payment_counts: { paid: number; pending: number; failed: number };
+  /** Paid / pending / failed / refunded registration counts. */
+  payment_counts: { paid: number; pending: number; failed: number; refunded: number };
   /** paid × entry fee, in pesewas. */
   revenue_pesewas: number;
   /** The prize split for the paid players so far. */
@@ -878,5 +883,28 @@ export interface AdminTournamentInput {
   match_deadline?: string;
   /** PATCH only: a deliberate status change. */
   status?: TournamentStatus;
+}
+
+/** The editable contact/identity fields of one registration (Module 4). */
+export interface AdminRegistrationInput {
+  /** PATCH only: the registration being edited. */
+  id?: string;
+  player_name?: string;
+  dls_team_name?: string;
+  phone_number?: string;
+  momo_number?: string;
+}
+
+/** Body of POST /api/admin/registrations/refund (Module 4). */
+export interface AdminRefundPayload {
+  /** The registration whose entry fee is being returned. */
+  registration_id: string;
+  /**
+   * 'paystack' — ask Paystack's refund API to return the money (only works
+   * for real Paystack transactions);
+   * 'manual' — the organizer already returned the money by hand (MoMo) and
+   * only the row needs marking.
+   */
+  mode: 'paystack' | 'manual';
 }
 

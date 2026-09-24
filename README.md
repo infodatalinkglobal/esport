@@ -42,6 +42,10 @@ This creates all 7 tables, the indexes, the Row Level Security policies, the
 > you upgrade to Pro — preview branches spawn a database per pull request and are
 > billed hourly.
 >
+> **Already have a live database from before the admin dashboard?** Also run
+> `supabase/migrations/20260925000000_refunded_status.sql` once (it adds the
+> `refunded` payment status the dashboard's refund action writes).
+>
 > **Already have a live database from before the security hardening?** Also run
 > `supabase/migrations/20260924000000_security_and_payment_hardening.sql` once
 > (SQL Editor → paste → RUN, or let the GitHub integration apply it). It closes
@@ -143,8 +147,9 @@ Scripts: `npm run build`, `npm start`, `npm run typecheck`.
 | `POST /api/admin/draw-knockout` | 🔒 Builds the knockout bracket (see below) |
 | `POST /api/admin/verify` | 🔒 The dashboard's login check |
 | `GET /api/admin/overview` | 🔒 Everything the dashboard's Overview tab shows (stats, counts, action availability) |
-| `GET /api/admin/registrations` | 🔒 The full player list, contacts included |
+| `GET`/`PATCH /api/admin/registrations` | 🔒 The full player list, contacts included / edit a player's details |
 | `POST /api/admin/registrations/mark-paid` | 🔒 Manual MoMo confirmation (atomic, capacity-checked) |
+| `POST /api/admin/registrations/refund` | 🔒 Refund a player (Paystack refund API, or mark refunded for manual MoMo) — frees the slot |
 | `GET /api/admin/matches` | 🔒 Every group + knockout match, decorated with names |
 | `POST /api/admin/match-result` | 🔒 Set/override a result; settles disputes (updates standings, advances the bracket) |
 | `POST /api/admin/tournaments` | 🔒 Create the next tournament |
@@ -186,9 +191,12 @@ job:
 | Tab | What you do there |
 | --- | --- |
 | **Overview** | Live stats (paid players, revenue, prize split, progress) and every lifecycle action: close/reopen registration, draw groups, draw knockout, reset the group stage, mark completed |
-| **Players** | Every registration with contacts; **Mark paid** for manual MoMo confirmations; WhatsApp links to nudge pending players |
-| **Matches** | Every fixture with scores and screenshots; filter the **disputed** queue and settle it by entering the true result |
+| **Players** | Every registration with contacts; **Mark paid** for manual MoMo confirmations; **Refund** via Paystack (or mark refunded for manual MoMo); inline **editing** of player details; the **broadcast composer** (select recipients, write once, copy for WhatsApp); **CSV export** |
+| **Matches** | Every fixture with scores and screenshots; filter the **disputed** queue and settle it by entering the true result; **CSV export** |
 | **Tournament** | Edit deadlines/title/size, change status, and create the next tournament |
+
+The dashboard wears its own light back-office skin, so it never looks like the
+player site.
 
 The dashboard reuses the same hardened server paths as the automatic flows:
 manual "Mark paid" goes through the atomic capacity-checked
@@ -434,6 +442,15 @@ group_matches**, then re-save the match in the app to recalculate the table.
 - [ ] Matches tab: the disputed filter lists disputed matches; entering a group
       scoreline recalculates the standings; picking a knockout winner advances
       them (and completing the Grand Final completes the tournament)
+- [ ] Players tab → Refund on a paid player (pre-draw): manual mode marks the
+      row `refunded`, the slot frees up, and the paid count drops; Paystack
+      mode returns a friendly error for manual MoMo payments
+- [ ] Players tab → Edit: fix a name/team/number inline; a duplicate WhatsApp
+      number is refused with the other player's name
+- [ ] Players tab → Broadcast: select players, write a message, "Copy for
+      WhatsApp" puts the message plus contacts on the clipboard
+- [ ] ⬇ CSV on Players and Matches downloads a spreadsheet of the rows
+- [ ] The dashboard is light-themed while the player site stays dark
 - [ ] Setting a result on a completed knockout match → refused with the
       "winner has advanced" message
 - [ ] Tournament tab: creating a cup makes it the advertised one on `/`;

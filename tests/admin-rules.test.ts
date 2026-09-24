@@ -13,10 +13,12 @@ import {
   ALLOWED_STATUS_TRANSITIONS,
   adminActionAvailability,
   canChangeStatus,
+  canRefund,
   canSetResult,
   countMatches,
   countPayments,
   validateAdminMatchResult,
+  validateRegistrationInput,
   validateTournamentInput,
 } from '../lib/admin-rules';
 import type { Tournament, TournamentStatus } from '../types';
@@ -80,15 +82,16 @@ function createBody(overrides: Record<string, unknown> = {}): Record<string, unk
 
 /* ------------------------------------------------------------------ counts */
 
-test('countPayments tallies paid, pending and failed rows', () => {
+test('countPayments tallies paid, pending, failed and refunded rows', () => {
   const counts = countPayments([
     { payment_status: 'paid' },
     { payment_status: 'paid' },
     { payment_status: 'pending' },
     { payment_status: 'failed' },
     { payment_status: 'paid' },
+    { payment_status: 'refunded' },
   ]);
-  assert.deepEqual(counts, { paid: 3, pending: 1, failed: 1 });
+  assert.deepEqual(counts, { paid: 3, pending: 1, failed: 1, refunded: 1 });
 });
 
 test('countMatches tallies the three match statuses and the total', () => {
@@ -373,4 +376,55 @@ test('a status patch must follow the transition map', () => {
     current,
   });
   assert.equal(legal.ok, true);
+});
+
+
+/* ---------------------------------------------------------------- refunds */
+
+test('only paid players in undrawn tournaments can be refunded', () => {
+  assert.equal(canRefund('paid', 'open'), true);
+  assert.equal(canRefund('paid', 'closed'), true);
+  assert.equal(canRefund('paid', 'groups_drawn'), false);
+  assert.equal(canRefund('paid', 'bracket_drawn'), false);
+  assert.equal(canRefund('paid', 'completed'), false);
+  assert.equal(canRefund('pending', 'open'), false);
+  assert.equal(canRefund('failed', 'open'), false);
+  assert.equal(canRefund('refunded', 'open'), false);
+});
+
+/* ------------------------------------------------------- registration edits */
+
+test('a registration edit accepts clean contact details', () => {
+  const result = validateRegistrationInput({
+    id: 'r-1',
+    player_name: '  Kwame   Mensah ',
+    dls_team_name: 'Accra Lions',
+    phone_number: '0241234567',
+    momo_number: '0201234567',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.value.player_name, 'Kwame Mensah');
+});
+
+test('a registration edit needs the id and at least one field', () => {
+  assert.equal(validateRegistrationInput({}).ok, false);
+  assert.equal(validateRegistrationInput({ id: 'r-1' }).ok, false);
+  assert.equal(validateRegistrationInput({ id: 'r-1', payment_status: 'paid' }).ok, false);
+});
+
+test('phone numbers are validated and normalised, never half-edited', () => {
+  const bad = validateRegistrationInput({ id: 'r-1', phone_number: '123' });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /valid Ghanaian number/i);
+
+  const momo = validateRegistrationInput({ id: 'r-1', momo_number: 'not-a-number' });
+  assert.equal(momo.ok, false);
+});
+
+test('names too short or too long are refused', () => {
+  assert.equal(validateRegistrationInput({ id: 'r-1', player_name: 'K' }).ok, false);
+  assert.equal(
+    validateRegistrationInput({ id: 'r-1', dls_team_name: 'x'.repeat(50) }).ok,
+    false,
+  );
 });

@@ -11,6 +11,9 @@
  *   - the tab navigation (Overview / Players / Matches / Tournament),
  *   - the page itself underneath.
  *
+ * The shell wears the dashboard's own light "back office" skin
+ * (`.admin-light`), so it never looks like the player site.
+ *
  * The gate is intentionally dumb about data: it owns no rows, so it never
  * needs to refresh when an action changes something.
  */
@@ -60,27 +63,27 @@ function LoginForm() {
 
   return (
     <main id="main" className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
-      <div className="card flex flex-col gap-4 p-6">
+      <div className="acard flex flex-col gap-4 p-6">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-pitch-400">
+          <p className="text-xs font-semibold uppercase tracking-widest text-pitch-600">
             Organizer only
           </p>
-          <h1 className="mt-1 text-2xl font-extrabold">Admin Dashboard</h1>
-          <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            Enter the admin secret (<code className="text-slate-300">ADMIN_SECRET</code>) to
+          <h1 className="mt-1 text-2xl font-extrabold text-slate-900">Admin Dashboard</h1>
+          <p className="mt-2 text-sm leading-relaxed text-slate-600">
+            Enter the admin secret (<code className="text-slate-800">ADMIN_SECRET</code>) to
             manage tournaments, payments, results and draws.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
-            <label htmlFor="admin-secret" className="field-label">
+            <label htmlFor="admin-secret" className="afield-label">
               Admin secret
             </label>
             <input
               id="admin-secret"
               type="password"
-              className="field"
+              className="afield"
               value={secret}
               onChange={(event) => setSecret(event.target.value)}
               placeholder="Your ADMIN_SECRET"
@@ -89,18 +92,18 @@ function LoginForm() {
             />
           </div>
           {error ? (
-            <p role="alert" className="text-sm font-medium text-red-300">
+            <p role="alert" className="text-sm font-medium text-red-600">
               {error}
             </p>
           ) : null}
-          <button type="submit" className="btn-primary" disabled={busy || !secret.trim()}>
+          <button type="submit" className="abtn-primary" disabled={busy || !secret.trim()}>
             {busy ? 'Checking…' : 'Unlock dashboard'}
           </button>
         </form>
 
         <p className="text-xs leading-relaxed text-slate-500">
           The secret is kept for this browser tab only and sent as the
-          <code className="mx-1 text-slate-400">x-admin-secret</code> header on every request.
+          <code className="mx-1 text-slate-600">x-admin-secret</code> header on every request.
         </p>
       </div>
     </main>
@@ -121,7 +124,7 @@ function TournamentPicker() {
     <label className="flex w-full max-w-xs flex-col gap-1 sm:w-72">
       <span className="sr-only">Tournament</span>
       <select
-        className="field min-h-0 py-2 text-sm"
+        className="afield min-h-0 py-2 text-sm"
         value={selectedId ?? ''}
         onChange={(event) => selectTournament(event.target.value)}
       >
@@ -148,16 +151,16 @@ function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/90 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="flex items-center justify-between gap-3">
-            <Link href="/admin" className="flex items-center whitespace-nowrap text-sm font-bold">
-              DLS <span className="ml-1 text-pitch-400">Admin</span>
+            <Link href="/admin" className="flex items-center whitespace-nowrap text-sm font-bold text-slate-900">
+              DLS <span className="ml-1 text-pitch-600">Admin</span>
             </Link>
             <button
               type="button"
               onClick={logout}
-              className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-slate-300 active:bg-white/5 sm:hidden"
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:hidden"
             >
               Log out
             </button>
@@ -166,7 +169,7 @@ function Shell({ children }: { children: ReactNode }) {
           <button
             type="button"
             onClick={logout}
-            className="hidden rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/5 sm:block"
+            className="hidden rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:block"
           >
             Log out
           </button>
@@ -183,8 +186,8 @@ function Shell({ children }: { children: ReactNode }) {
                     aria-current={active ? 'page' : undefined}
                     className={`flex min-h-tap items-center whitespace-nowrap rounded-lg px-3 text-sm font-semibold transition ${
                       active
-                        ? 'bg-pitch-500/15 text-pitch-300'
-                        : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                        ? 'bg-pitch-50 text-pitch-700'
+                        : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
                     }`}
                   >
                     {tab.label}
@@ -214,7 +217,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
   if (auth === 'checking') {
     return (
       <main id="main" className="mx-auto flex min-h-screen max-w-md items-center justify-center px-4">
-        <p className="text-sm font-medium text-slate-400">Checking your session…</p>
+        <p className="text-sm font-medium text-slate-500">Checking your session…</p>
       </main>
     );
   }

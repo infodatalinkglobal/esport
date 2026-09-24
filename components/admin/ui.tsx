@@ -3,15 +3,15 @@
 /**
  * Small shared building blocks for the admin dashboard (MODULE 4).
  *
- * Deliberately tiny: the dashboard reuses the player site's Tailwind component
- * classes (.card, .btn-primary, .badge, .field) and only adds the few pieces
- * an operator screen needs — stat cards, payment badges and a two-tap
+ * Deliberately tiny, and deliberately light: the dashboard wears its own
+ * back-office skin (see the admin component classes in globals.css) so it
+ * reads as a separate control panel rather than a player page. It adds the few
+ * pieces an operator screen needs — stat cards, payment badges and a two-tap
  * confirmation button (no window.confirm, which embedded browsers block).
  */
 
 import { useState, type ReactNode } from 'react';
 import type { AdminActionState, PaymentStatus } from '@/types';
-import { matchStatusClasses, matchStatusEmoji } from '@/lib/format';
 
 /* ------------------------------------------------------------------ StatCard */
 
@@ -34,18 +34,18 @@ interface StatCardProps {
  */
 export function StatCard({ value, label, sub, accent = false }: StatCardProps) {
   return (
-    <div className="card flex flex-col gap-1 p-4">
+    <div className="acard flex flex-col gap-1 p-4">
       <span
         className={`text-2xl font-extrabold tabular-nums ${
-          accent ? 'text-pitch-400' : 'text-slate-100'
+          accent ? 'text-pitch-600' : 'text-slate-900'
         }`}
       >
         {value}
       </span>
-      <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         {label}
       </span>
-      {sub ? <span className="text-sm text-slate-400">{sub}</span> : null}
+      {sub ? <span className="text-sm text-slate-500">{sub}</span> : null}
     </div>
   );
 }
@@ -53,33 +53,34 @@ export function StatCard({ value, label, sub, accent = false }: StatCardProps) {
 /* -------------------------------------------------------------- PaymentBadge */
 
 const PAYMENT_BADGE_CLASSES: Record<PaymentStatus, string> = {
-  paid: 'border-pitch-500/40 bg-pitch-500/10 text-pitch-300',
-  pending: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-  failed: 'border-red-400/40 bg-red-400/10 text-red-300',
+  paid: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  pending: 'border-amber-200 bg-amber-50 text-amber-700',
+  failed: 'border-red-200 bg-red-50 text-red-700',
+  refunded: 'border-slate-200 bg-slate-100 text-slate-600',
 };
 
 /**
  * A payment-status badge (the organizer's colour language for money).
  *
- * @param props.status `paid` | `pending` | `failed`.
+ * @param props.status `paid` | `pending` | `failed` | `refunded`.
  */
 export function PaymentBadge({ status }: { status: PaymentStatus }) {
-  return (
-    <span className={`badge ${PAYMENT_BADGE_CLASSES[status]}`}>{status}</span>
-  );
+  return <span className={`abadge ${PAYMENT_BADGE_CLASSES[status]}`}>{status}</span>;
 }
 
+const MATCH_BADGE_CLASSES = {
+  pending: 'border-amber-200 bg-amber-50 text-amber-700',
+  completed: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  disputed: 'border-red-200 bg-red-50 text-red-700',
+} as const;
+
 /**
- * A match-status badge, matching the player pages' colours exactly.
+ * A match-status badge.
  *
  * @param props.status `pending` | `completed` | `disputed`.
  */
 export function MatchBadge({ status }: { status: 'pending' | 'completed' | 'disputed' }) {
-  return (
-    <span className={`badge ${matchStatusClasses(status)}`}>
-      {matchStatusEmoji(status)} {status}
-    </span>
-  );
+  return <span className={`abadge ${MATCH_BADGE_CLASSES[status]}`}>{status}</span>;
 }
 
 /* ------------------------------------------------------------ ConfirmButton */
@@ -121,8 +122,8 @@ export function ConfirmButton({
   const [armed, setArmed] = useState(false);
 
   const base = danger
-    ? 'border-red-400/40 bg-red-400/10 text-red-300 hover:bg-red-400/20'
-    : 'border-white/20 bg-white/5 text-slate-100 hover:bg-white/10';
+    ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
 
   return (
     <div className="flex w-full flex-col gap-1">
@@ -138,10 +139,10 @@ export function ConfirmButton({
             window.setTimeout(() => setArmed(false), 5000);
           }
         }}
-        className={`flex min-h-tap w-full items-center justify-center gap-2 rounded-xl border px-4 py-3
-          text-base font-semibold transition active:scale-[0.99]
+        className={`flex min-h-tap w-full items-center justify-center gap-2 rounded-lg border px-4 py-3
+          text-base font-semibold shadow-sm transition active:scale-[0.99]
           disabled:cursor-not-allowed disabled:opacity-60
-          ${armed ? 'border-pitch-400 bg-pitch-500/20 text-pitch-200' : base}`}
+          ${armed ? 'border-pitch-600 bg-pitch-50 text-pitch-700' : base}`}
       >
         {busy ? 'Working…' : armed ? (confirmLabel ?? 'Tap again to confirm') : label}
       </button>
@@ -171,8 +172,8 @@ export function Banner({ tone, children }: BannerProps) {
       role="status"
       className={`rounded-xl border px-4 py-3 text-sm font-medium ${
         tone === 'ok'
-          ? 'border-pitch-500/40 bg-pitch-500/10 text-pitch-300'
-          : 'border-red-400/40 bg-red-400/10 text-red-300'
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+          : 'border-red-200 bg-red-50 text-red-700'
       }`}
     >
       {children}

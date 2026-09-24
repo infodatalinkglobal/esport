@@ -74,9 +74,11 @@ create table if not exists public.registrations (
   dls_team_name      text not null,
   -- Paystack reference. Unique, so one payment can never register two players.
   paystack_reference text unique not null,
-  -- 'pending' | 'paid' | 'failed'
+  -- 'pending' | 'paid' | 'failed' | 'refunded'
   -- ('failed' is an addition to the brief: it lets a declined payment be
-  --  recognised, shown to the player, and retried on the same phone number.)
+  --  recognised, shown to the player, and retried on the same phone number.
+  --  'refunded' (Module 4) records money the organizer returned — the row
+  --  keeps its payment trail but stops counting towards the paid slots.)
   payment_status     text default 'pending',
   created_at         timestamptz default now()
 );
@@ -84,7 +86,7 @@ create table if not exists public.registrations (
 do $$ begin
   alter table public.registrations
     add constraint registrations_payment_status_check
-    check (payment_status in ('pending','paid','failed'));
+    check (payment_status in ('pending','paid','failed','refunded'));
 exception when duplicate_object then null; end $$;
 
 -- One phone number may only register ONCE per tournament.

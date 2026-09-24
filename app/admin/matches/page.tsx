@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import type { AdminMatchRow, MatchStatus } from '@/types';
 import { useAdmin } from '@/components/admin/admin-context';
 import { Banner, MatchBadge } from '@/components/admin/ui';
-import { adminFetch } from '@/lib/admin-client';
+import { adminFetch, downloadCsv } from '@/lib/admin-client';
 
 /** The status filter chips. */
 const FILTERS = ['all', 'pending', 'disputed', 'completed'] as const;
@@ -72,6 +72,22 @@ export default function AdminMatchesPage() {
     setMatches([]);
     void load();
   }, [load]);
+
+  /** Exports every match of the tournament as CSV. */
+  function exportCsv() {
+    downloadCsv(
+      `matches-${(selectedId ?? 'tournament').slice(0, 8)}.csv`,
+      matches.map((match) => ({
+        stage: match.kind,
+        label: match.label,
+        player_a: match.player_a_name,
+        player_b: match.player_b_name,
+        score: match.kind === 'group' ? `${match.player_a_score ?? ''}-${match.player_b_score ?? ''}` : '',
+        winner: match.winner_name ?? '',
+        status: match.status,
+      })),
+    );
+  }
 
   /** The counts shown on the filter chips. */
   const counts = useMemo(() => {
@@ -159,22 +175,22 @@ export default function AdminMatchesPage() {
 
   if (!selectedId && !loading) {
     return (
-      <div className="card">
-        <h1 className="text-lg font-bold">No tournament selected</h1>
-        <p className="mt-1 text-sm text-slate-400">Pick a tournament in the header first.</p>
+      <div className="acard">
+        <h1 className="text-lg font-bold text-slate-900">No tournament selected</h1>
+        <p className="mt-1 text-sm text-slate-600">Pick a tournament in the header first.</p>
       </div>
     );
   }
 
   if (loading) {
-    return <p className="text-sm font-medium text-slate-400">Loading the matches…</p>;
+    return <p className="text-sm font-medium text-slate-500">Loading the matches…</p>;
   }
 
   if (failed) {
     return (
       <div className="flex flex-col gap-3">
         <Banner tone="error">{failed}</Banner>
-        <button type="button" className="btn-secondary max-w-xs" onClick={() => void load()}>
+        <button type="button" className="abtn-secondary max-w-xs" onClick={() => void load()}>
           Try again
         </button>
       </div>
@@ -185,18 +201,27 @@ export default function AdminMatchesPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-extrabold sm:text-2xl">Matches</h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <h1 className="text-xl font-extrabold text-slate-900 sm:text-2xl">Matches</h1>
+          <p className="mt-1 text-sm text-slate-600">
             Settle disputes and enter results — standings and the bracket update themselves.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/5"
-        >
-          ↻ Refresh
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
+          >
+            ↻ Refresh
+          </button>
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
+          >
+            ⬇ CSV
+          </button>
+        </div>
       </div>
 
       {banner ? <Banner tone={banner.tone}>{banner.text}</Banner> : null}
@@ -212,8 +237,8 @@ export default function AdminMatchesPage() {
             onClick={() => setFilter(option)}
             className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
               filter === option
-                ? 'border-pitch-400 bg-pitch-500/15 text-pitch-300'
-                : 'border-white/15 text-slate-400 hover:bg-white/5'
+                ? 'border-pitch-600 bg-pitch-50 text-pitch-700'
+                : 'border-slate-300 bg-white text-slate-500 hover:bg-slate-50'
             }`}
           >
             {option} · {counts[option]}
@@ -223,7 +248,7 @@ export default function AdminMatchesPage() {
 
       {/* The match cards */}
       {visible.length === 0 ? (
-        <div className="card py-8 text-center text-sm text-slate-500">
+        <div className="acard py-8 text-center text-sm text-slate-500">
           {matches.length === 0
             ? 'No fixtures yet — draw the groups first.'
             : 'Nothing with that status.'}
@@ -231,31 +256,31 @@ export default function AdminMatchesPage() {
       ) : (
         <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {visible.map((match) => (
-            <li key={`${match.kind}-${match.id}`} className="card flex flex-col gap-3">
+            <li key={`${match.kind}-${match.id}`} className="acard flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     {match.kind === 'group' ? 'Group stage' : 'Knockout'} · {match.label}
                   </p>
-                  <p className="mt-1 font-bold text-slate-100">
+                  <p className="mt-1 font-bold text-slate-900">
                     {match.player_a_name}
                     {match.kind === 'group' && match.status === 'completed' ? (
-                      <span className="mx-2 rounded-lg bg-white/10 px-2 py-0.5 tabular-nums">
+                      <span className="mx-2 rounded-lg bg-slate-100 px-2 py-0.5 tabular-nums">
                         {match.player_a_score} – {match.player_b_score}
                       </span>
                     ) : (
-                      <span className="mx-2 text-slate-500">vs</span>
+                      <span className="mx-2 text-slate-400">vs</span>
                     )}
                     {match.player_b_name}
                   </p>
                   {match.winner_name ? (
-                    <p className="mt-0.5 text-xs font-semibold text-pitch-300">
+                    <p className="mt-0.5 text-xs font-semibold text-pitch-700">
                       🏆 {match.winner_name}
                     </p>
                   ) : match.status === 'completed' &&
                     match.kind === 'group' &&
                     match.player_a_score === match.player_b_score ? (
-                    <p className="mt-0.5 text-xs font-semibold text-slate-400">🤝 Draw</p>
+                    <p className="mt-0.5 text-xs font-semibold text-slate-600">🤝 Draw</p>
                   ) : null}
                 </div>
                 <MatchBadge status={match.status} />
@@ -267,7 +292,7 @@ export default function AdminMatchesPage() {
                   Proof:{' '}
                   {match.player_a_screenshot ? (
                     <a
-                      className="text-pitch-300 underline underline-offset-2"
+                      className="text-pitch-700 underline underline-offset-2"
                       href={match.player_a_screenshot}
                       target="_blank"
                       rel="noreferrer"
@@ -278,7 +303,7 @@ export default function AdminMatchesPage() {
                   {match.player_a_screenshot && match.player_b_screenshot ? ' · ' : ''}
                   {match.player_b_screenshot ? (
                     <a
-                      className="text-pitch-300 underline underline-offset-2"
+                      className="text-pitch-700 underline underline-offset-2"
                       href={match.player_b_screenshot}
                       target="_blank"
                       rel="noreferrer"
@@ -299,11 +324,11 @@ export default function AdminMatchesPage() {
                       {match.kind === 'group' ? (
                         <div className="flex items-end gap-2">
                           <label className="flex-1">
-                            <span className="field-label mb-0.5 text-xs">
+                            <span className="afield-label mb-0.5 text-xs">
                               {match.player_a_name}
                             </span>
                             <input
-                              className="field py-2 text-center tabular-nums"
+                              className="afield py-2 text-center tabular-nums"
                               type="number"
                               inputMode="numeric"
                               min={0}
@@ -317,11 +342,11 @@ export default function AdminMatchesPage() {
                           </label>
                           <span className="pb-3 text-slate-500">–</span>
                           <label className="flex-1">
-                            <span className="field-label mb-0.5 text-xs">
+                            <span className="afield-label mb-0.5 text-xs">
                               {match.player_b_name}
                             </span>
                             <input
-                              className="field py-2 text-center tabular-nums"
+                              className="afield py-2 text-center tabular-nums"
                               type="number"
                               inputMode="numeric"
                               min={0}
@@ -336,9 +361,9 @@ export default function AdminMatchesPage() {
                         </div>
                       ) : (
                         <label>
-                          <span className="field-label text-xs">Winner</span>
+                          <span className="afield-label text-xs">Winner</span>
                           <select
-                            className="field py-2 text-sm"
+                            className="afield py-2 text-sm"
                             required
                             value={form.winner_id}
                             onChange={(event) =>
@@ -355,12 +380,12 @@ export default function AdminMatchesPage() {
                         </label>
                       )}
                       <div className="flex gap-2">
-                        <button type="submit" className="btn-primary flex-1" disabled={busy}>
+                        <button type="submit" className="abtn-primary flex-1" disabled={busy}>
                           {busy ? 'Saving…' : 'Save result'}
                         </button>
                         <button
                           type="button"
-                          className="btn-secondary flex-1"
+                          className="abtn-secondary flex-1"
                           onClick={() => setOpenForm(null)}
                         >
                           Cancel
@@ -370,7 +395,7 @@ export default function AdminMatchesPage() {
                   ) : (
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="abtn-secondary"
                       onClick={() => toggleForm(match)}
                     >
                       {match.status === 'disputed' ? '⚖️ Settle dispute' : 'Enter result'}

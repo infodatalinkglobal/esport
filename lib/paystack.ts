@@ -473,6 +473,77 @@ export async function verifyPayment(
 }
 
 /* ==========================================================================
+ * Refunds (Module 4)
+ * ========================================================================== */
+
+/** What a refund attempt can conclude. */
+export type RefundOutcome =
+  | { ok: true; state: 'queued' | 'processed' | 'already-refunded' }
+  | { ok: false; error: string };
+
+/**
+ * Asks Paystack to return a transaction's money (full amount).
+ *
+ * Used by the admin dashboard's refund action. Paystack processes refunds
+ * asynchronously — `queued` means accepted, the money follows in their normal
+ * settlement window. Manual MoMo payments (marked paid by hand) have no real
+ * Paystack transaction, so this call will fail for them and the organizer
+ * refunds by hand instead (the route tells them so).
+ *
+ * @param reference The Paystack transaction reference stored on the registration.
+ * @returns The outcome; never throws.
+ */
+export async function refundPayment(reference: string): Promise<RefundOutcome> {
+  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!secretKey) {
+    return { ok: false, error: 'Paystack is not configured on the server.' };
+  }
+  if (!reference) {
+    return { ok: false, error: 'This registration has no Paystack reference to refund.' };
+  }
+
+  try {
+    const response = await fetch(`${PAYSTACK_API}/refund`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ transaction_reference: reference }),
+      cache: 'no-store',
+    });
+
+    const body = (await response.json().catch(() => null)) as {
+      status?: boolean;
+      message?: string;
+      data?: { status?: string };
+    } | null;
+
+    if (response.ok && body?.status) {
+      const state = body.data?.status;
+      if (state === 'processed') return { ok: true, state: 'processed' };
+      if (state === 'refunded') return { ok: true, state: 'already-refunded' };
+      return { ok: true, state: 'queued' };
+    }
+
+    // "Refund already created" arrives as an error — it is success for us.
+    if (/already/i.test(body?.message ?? '')) {
+      return { ok: true, state: 'already-refunded' };
+    }
+
+    return {
+      ok: false,
+      error:
+        body?.message?.replace(/^Error:/, '').trim() ||
+        'Paystack refused the refund. Check the transaction in the Paystack dashboard.',
+    };
+  } catch {
+    return { ok: false, error: 'Could not reach Paystack just now. Try again in a moment.' };
+  }
+}
+
+
+/* ==========================================================================
  * Browser-side inline popup
  * ========================================================================== */
 

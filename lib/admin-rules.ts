@@ -19,7 +19,7 @@ import type {
   AdminActionAvailability,
   AdminActionState,
   AdminMatchCounts,
-  AdminMatchResultPayload,
+  AdminRegistrationInput,
   AdminTournamentInput,
   MatchStatus,
   PaymentStatus,
@@ -29,6 +29,7 @@ import type {
 } from '@/types';
 import type { ValidationResult } from './validation';
 import { isSupportedPlayerCount, MIN_PLAYERS } from './draw-rules';
+import { isValidGhanaPhone, normalizePhone } from './format';
 
 /* ==========================================================================
  * Status transitions
@@ -70,18 +71,36 @@ export function canChangeStatus(from: TournamentStatus, to: TournamentStatus): b
  * Counts registrations by payment status.
  *
  * @param rows Registration rows (only `payment_status` is read).
- * @returns `{ paid, pending, failed }` counts.
+ * @returns `{ paid, pending, failed, refunded }` counts.
  */
 export function countPayments(
   rows: Array<Pick<Registration, 'payment_status'>>,
-): { paid: number; pending: number; failed: number } {
-  const counts = { paid: 0, pending: 0, failed: 0 };
+): { paid: number; pending: number; failed: number; refunded: number } {
+  const counts = { paid: 0, pending: 0, failed: 0, refunded: 0 };
   for (const row of rows) {
     if (row.payment_status === 'paid') counts.paid += 1;
     else if (row.payment_status === 'pending') counts.pending += 1;
     else if (row.payment_status === 'failed') counts.failed += 1;
+    else if (row.payment_status === 'refunded') counts.refunded += 1;
   }
   return counts;
+}
+
+/**
+ * True when the organizer may refund one registration's entry fee right now.
+ *
+ * Only `paid` money can go back, and only before the groups are drawn — after
+ * the draw the player has fixtures and standings, so a refund would corrupt
+ * the tournament (the same reason mark-paid freezes after the draw).
+ *
+ * @param paymentStatus The registration's payment status.
+ * @param tournamentStatus The tournament's lifecycle stage.
+ */
+export function canRefund(
+  paymentStatus: PaymentStatus,
+  tournamentStatus: TournamentStatus,
+): boolean {
+  return paymentStatus === 'paid' && (tournamentStatus === 'open' || tournamentStatus === 'closed');
 }
 
 /**
@@ -490,4 +509,83 @@ export function validateAdminMatchResult(
  */
 export function canSetResult(status: MatchStatus): boolean {
   return status === 'pending' || status === 'disputed';
+}
+
+/* ==========================================================================
+ * Registration edits
+ * ========================================================================== */
+
+/** Longest player/team names we accept. */
+export const MAX_PLAYER_NAME_LENGTH = 80;
+export const MAX_TEAM_NAME_LENGTH = 40;
+
+/**
+ * Parses and validates an organizer's registration edit.
+ *
+ * Only the identity/contact fields are editable — payment status has its own
+ * dedicated flows (mark-paid, refund), and the tournament cannot be changed at
+ * all. Phone and MoMo numbers must be valid Ghanaian numbers; the unique
+ * phone-per-tournament rule is enforced by the route against the database
+ * (the pure validator cannot see other rows).
+ *
+ * @param input The raw request body (`{ id, …fields }`).
+ * @returns The cleaned input, or a message safe to show the organizer.
+ */
+export function validateRegistrationInput(
+  input: unknown,
+): ValidationResult<AdminRegistrationInput> {
+  if (!input || typeof input !== 'object') {
+    return { ok: false, error: 'Send the registration details as a JSON object.' };
+  }
+
+  const body = input as Record<string, unknown>;
+  const cleaned: AdminRegistrationInput = {};
+
+  const id = typeof body.id === 'string' ? body.id.trim() : '';
+  if (!id) return { ok: false, error: 'Send the registration id, e.g. {"id":"…"}.' };
+  cleaned.id = id;
+
+  const cleanText = (value: unknown, label: string, max: number): ValidationResult<string> => {
+    if (typeof value !== 'string') return { ok: false, error: `The ${label} must be text.` };
+    const text = value.trim().replace(/\s+/g, ' ');
+    if (text.length < 2) return { ok: false, error: `The ${label} is too short.` };
+    if (text.length > max) {
+      return { ok: false, error: `The ${label} must be at most ${max} characters.` };
+    }
+    return { ok: true, value: text };
+  };
+
+  if (body.player_name !== undefined) {
+    const parsed = cleanText(body.player_name, "player's name", MAX_PLAYER_NAME_LENGTH);
+    if (!parsed.ok) return parsed;
+    cleaned.player_name = parsed.value;
+  }
+
+  if (body.dls_team_name !== undefined) {
+    const parsed = cleanText(body.dls_team_name, 'DLS team name', MAX_TEAM_NAME_LENGTH);
+    if (!parsed.ok) return parsed;
+    cleaned.dls_team_name = parsed.value;
+  }
+
+  if (body.phone_number !== undefined) {
+    const phone = typeof body.phone_number === 'string' ? body.phone_number : '';
+    if (!isValidGhanaPhone(phone)) {
+      return { ok: false, error: 'That WhatsApp number is not a valid Ghanaian number (e.g. 024 123 4567).' };
+    }
+    cleaned.phone_number = normalizePhone(phone);
+  }
+
+  if (body.momo_number !== undefined) {
+    const momo = typeof body.momo_number === 'string' ? body.momo_number : '';
+    if (!isValidGhanaPhone(momo)) {
+      return { ok: false, error: 'That MoMo number is not a valid Ghanaian number (e.g. 024 123 4567).' };
+    }
+    cleaned.momo_number = normalizePhone(momo);
+  }
+
+  if (Object.keys(cleaned).length <= 1) {
+    return { ok: false, error: 'Nothing to update — send at least one field besides the id.' };
+  }
+
+  return { ok: true, value: cleaned };
 }
