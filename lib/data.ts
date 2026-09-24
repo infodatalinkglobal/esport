@@ -122,7 +122,9 @@ export async function getTournamentById(
  * Counts a tournament's registrations, split by payment status.
  *
  * The landing page shows "6 / 8 registered", and the registration API uses the
- * same numbers to decide whether the tournament is full.
+ * same numbers to decide whether the tournament is full. Counts come from
+ * three `head: true` queries, so no registration rows ever travel over the
+ * wire — this runs on every homepage render and every live poll.
  *
  * @param tournamentId The tournament's UUID.
  * @returns `{ paid, pending, failed, total }` — all zeros on failure.
@@ -138,24 +140,28 @@ export async function getRegistrationCounts(tournamentId: string): Promise<{
 
   try {
     const supabase = supabaseAdmin();
-    const { data, error } = await supabase
-      .from('registrations')
-      .select('payment_status')
-      .eq('tournament_id', tournamentId);
 
-    if (error) {
-      console.error('[data.getRegistrationCounts]', error);
-      return empty;
-    }
+    const countBy = async (status: string): Promise<number> => {
+      const { count, error } = await supabase
+        .from('registrations')
+        .select('id', { count: 'exact', head: true })
+        .eq('tournament_id', tournamentId)
+        .eq('payment_status', status);
 
-    const rows = (data ?? []) as Array<{ payment_status: string }>;
-
-    return {
-      paid: rows.filter((row) => row.payment_status === 'paid').length,
-      pending: rows.filter((row) => row.payment_status === 'pending').length,
-      failed: rows.filter((row) => row.payment_status === 'failed').length,
-      total: rows.length,
+      if (error) {
+        throw error;
+      }
+      return count ?? 0;
     };
+
+    // Deliberately sequential: three tiny indexed counts, and it keeps the
+    // Supabase builders out of a Promise.all (its tuple inference struggles
+    // with mixed query builders — see getGroupStage below).
+    const paid = await countBy('paid');
+    const pending = await countBy('pending');
+    const failed = await countBy('failed');
+
+    return { paid, pending, failed, total: paid + pending + failed };
   } catch (error) {
     console.error('[data.getRegistrationCounts]', error);
     return empty;
