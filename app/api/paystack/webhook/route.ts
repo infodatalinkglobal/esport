@@ -2,6 +2,7 @@
  * Paystack webhook. This is the durable payment path: it records a successful
  * charge even when the customer's browser closes or never reaches our callback.
  */
+import { revalidatePath } from 'next/cache';
 import { NextResponse } from 'next/server';
 import { verifyPayment } from '@/lib/paystack';
 import { isValidPaystackSignature } from '@/lib/paystack-webhook';
@@ -58,6 +59,10 @@ export async function POST(request: Request) {
     // A non-2xx response asks Paystack to retry delivery.
     return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
   }
+
+  // A new player was just confirmed — drop any cached homepage HTML so the
+  // player count is current even when the customer's browser never came back.
+  revalidatePath('/', 'page');
 
   return NextResponse.json({ received: true });
 }
