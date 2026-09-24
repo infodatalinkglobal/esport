@@ -23,8 +23,10 @@ import { formatDateTime } from '@/lib/format';
 import { getActiveTournamentWithStatus, getRegistrationCounts } from '@/lib/data';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
-/** Player counts and deadlines change constantly — never cache this page. */
+/** Player counts and deadlines change constantly — never cache this page or its data. */
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 /**
  * The tournament rules, in the order they are published to players.
