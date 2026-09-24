@@ -40,6 +40,14 @@ This creates all 7 tables, the indexes, the Row Level Security policies, the
 > run twice, and doing both is harmless. Leave **preview branching** off unless
 > you upgrade to Pro — preview branches spawn a database per pull request and are
 > billed hourly.
+>
+> **Already have a live database from before the security hardening?** Also run
+> `supabase/migrations/20260924000000_security_and_payment_hardening.sql` once
+> (SQL Editor → paste → RUN, or let the GitHub integration apply it). It closes
+> a hole that let anyone insert themselves as `paid` with the public anon key,
+> adds the atomic capacity-checked `mark_registration_paid()` function the
+> server now uses, and tightens the screenshot-upload policy. New setups get
+> all of this from `setup.sql` and don't need the extra step.
 
 ### 2. Create the Paystack keys
 
@@ -88,6 +96,14 @@ For test transactions, use the matching `pk_test_…` / `sk_test_…` pair and s
 the URL in Paystack's test-mode settings. Never mix test and live keys. The
 endpoint verifies the HMAC-SHA512 signature and then independently verifies the
 transaction with Paystack before changing a registration.
+
+> **How a payment becomes `paid`:** the server calls the
+> `mark_registration_paid()` database function, which locks the tournament row
+> while it checks the paid count — so a full tournament can never be oversold,
+> even when two payments confirm at the same instant. If the last slot was
+> taken first, the loser gets a "we will refund you" message and the row stays
+> unpaid. Paystack `ongoing`/`pending` transactions never flip a registration
+> to `failed`; only terminal statuses do.
 
 ### 5. Run it
 
@@ -186,9 +202,15 @@ curl -X POST https://YOUR-DOMAIN/api/admin/draw-groups \
 
 Either way, the draw itself does this:
 
-1. Takes every **paid** player (needs at least 6, supports up to 16).
+1. Takes every **paid** player. The format needs **2 or 4 groups**, so allowed
+   sizes are **6–8 players** (2 groups) or **13–16 players** (4 groups).
+   9–12 players would draw 3 groups, which the knockout stage cannot bracket
+   (it crosses groups in pairs), so those tournaments are refused at
+   registration and the draw refuses them too.
 2. Shuffles them with Fisher-Yates — a provably fair draw.
-3. Splits them 4 per group: 8 → A & B, 10 → 4/3/3, 12 → A, B & C, 16 → A–D.
+3. Splits them into groups of 4: 8 → A & B, 16 → A–D (6–7 players → two groups
+   of 3 and 4; 13–15 → four groups with the remainder spread across the first
+   groups).
 4. Creates the `groups`, `group_members`, `group_matches` (6 fixtures per group
    of 4) and `group_standings` (all zeros) rows.
 5. Sets the tournament status to `groups_drawn`.
@@ -280,9 +302,16 @@ semifinal 2) — or just re-trigger the automatic move by setting the match back
 - [ ] The Paystack popup opens for MTN MoMo / Vodafone Cash / AirtelTigo
 - [ ] With the popup blocked, the button redirects to hosted Paystack instead
 - [ ] Paying (test mode) lands on `/payment/success` and flips the row to `paid`
+- [ ] Checking `/payment/verify` while a MoMo prompt is still open → "still
+      being confirmed", and the row stays `pending` (never `failed`)
 - [ ] Registering the same number twice → "You are already registered"
 - [ ] `status = closed` → "Registration is now closed"
 - [ ] 8 `paid` rows → "Tournament Full — contact us on WhatsApp"
+- [ ] A tournament whose `max_players` is 9–12 (or under 6) shows the
+      "size needs fixing" notice and refuses registrations
+- [ ] Two payments racing for the last slot: one confirms, the other gets
+      "Payment received, but the last slot was just taken. We will refund you"
+      and the row stays unpaid (`mark_registration_paid()` enforces the cap)
 
 ### Module 2 — group stage
 
@@ -379,9 +408,21 @@ still points at `localhost`, payments will not return to your confirmation page.
 
 - [ ] The schema has been applied — either `setup.sql` pasted into the SQL
       Editor, or the migration deployed by the GitHub integration (all 7 tables exist)
+- [ ] The security hardening has been applied —
+      `supabase/migrations/20260924000000_security_and_payment_hardening.sql`
+      (automatic via the GitHub integration; paste it once for hand-run projects)
 - [ ] Row Level Security is enabled on all 7 tables
 - [ ] The `result-screenshots` bucket exists (Storage → Buckets)
 - [ ] Switch Paystack to live keys when you are ready to take real money
+
+> **Storage, honestly:** the bucket stays public-by-URL and anonymous-upload by
+> design (screenshots upload straight from the player's phone, keeping 3 MB
+> photos off the API). The upload policy limits files to images under 5 MB with
+> the exact path shape the app writes, but a determined actor could still
+> upload images into valid-looking paths. Watch Storage usage; if it ever
+> becomes a problem, move the upload server-side so only real match players can
+> write. Related: a screenshot whose result submission is rejected afterwards
+> (e.g. "already submitted") stays in the bucket unused.
 
 ### 5. Full tournament dry run (in Paystack test mode)
 
