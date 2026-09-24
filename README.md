@@ -71,7 +71,25 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ⚠️ `SUPABASE_SERVICE_ROLE_KEY` and `PAYSTACK_SECRET_KEY` must **never** be
 prefixed with `NEXT_PUBLIC_`, and never committed. `.env.local` is git-ignored.
 
-### 4. Run it
+### 4. Configure the Paystack webhook
+
+In **Paystack Dashboard → Settings → API Keys & Webhooks**, set the webhook URL
+to:
+
+```text
+https://YOUR-PRODUCTION-DOMAIN/api/paystack/webhook
+```
+
+The webhook has no separate signing-secret setting: Paystack signs it with the
+secret key for the dashboard mode receiving the transaction. Therefore the
+production Vercel environment must contain the matching pair: `pk_live_…` in
+`NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY` and `sk_live_…` in `PAYSTACK_SECRET_KEY`.
+For test transactions, use the matching `pk_test_…` / `sk_test_…` pair and set
+the URL in Paystack's test-mode settings. Never mix test and live keys. The
+endpoint verifies the HMAC-SHA512 signature and then independently verifies the
+transaction with Paystack before changing a registration.
+
+### 5. Run it
 
 ```bash
 npm install
