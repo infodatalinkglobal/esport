@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { verifyPayment } from '@/lib/paystack';
+import { drawWhenTournamentIsFull } from '@/lib/draw';
 import { whatsappLink } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +24,11 @@ export default async function PaymentVerifyPage({ searchParams }: Props) {
   if (reference) {
     const result = await verifyPayment(reference);
     if (result.success) {
+      // The player who completed the last slot lands here first, so this page
+      // draws the groups itself (lib/draw.ts) rather than leaving them for the
+      // homepage to notice.
+      await drawWhenTournamentIsFull(result.tournament_id);
+
       // A new player was just confirmed — drop any cached homepage HTML so
       // the player count is current for the next visitor (including the
       // player returning from the success page).

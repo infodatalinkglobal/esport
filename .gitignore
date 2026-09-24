@@ -3,6 +3,9 @@
 
 # Next.js build output
 /.next
+# Isolated production build used to verify a build next to a running dev server
+# (see README → Troubleshooting): NEXT_DIST_DIR=.next-build npm run build
+/.next-build
 /out
 /build
 

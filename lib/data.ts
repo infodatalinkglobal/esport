@@ -29,6 +29,7 @@ import type {
   StandingRow,
   Tournament,
 } from '@/types';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabaseAdmin } from './supabase';
 import { groupFixturesByGroup, rankStandings } from './groups';
 import { knockoutMatchLabel } from './bracket';
@@ -171,15 +172,20 @@ export async function getRegistrationCounts(tournamentId: string): Promise<{
  * ⚠️ Server-side use only: the returned rows include phone and MoMo numbers.
  *
  * @param tournamentId The tournament's UUID.
+ * @param client An existing service-role client (optional). The group draw
+ *        passes the client it already has, so one request never opens two
+ *        connections.
  * @returns The paid registrations, oldest first.
  */
 export async function getPaidPlayers(
   tournamentId: string,
+  client?: SupabaseClient,
 ): Promise<Registration[]> {
-  if (!isSupabaseConfigured() || !tournamentId) return [];
+  if (!tournamentId) return [];
+  if (!client && !isSupabaseConfigured()) return [];
 
   try {
-    const supabase = supabaseAdmin();
+    const supabase = client ?? supabaseAdmin();
     const { data } = await supabase
       .from('registrations')
       .select('*')

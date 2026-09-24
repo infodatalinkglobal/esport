@@ -12,10 +12,12 @@
  */
 
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import type { VerifyPaymentPayload } from '@/types';
 import { handleServerError, jsonError, readJsonBody } from '@/lib/api';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { verifyPayment } from '@/lib/paystack';
+import { drawWhenTournamentIsFull } from '@/lib/draw';
 
 /** Always run on the server, never cached. */
 export const dynamic = 'force-dynamic';
@@ -47,6 +49,19 @@ export async function POST(request: Request) {
 
     if (!result.success) {
       return jsonError(result.error ?? 'We could not confirm that payment.', 400);
+    }
+
+    // Confirming the LAST slot draws the groups right here (lib/draw.ts), so a
+    // full tournament has its fixtures before the player's success page loads.
+    // Duplicate webhook/callback deliveries cannot draw twice — the database
+    // lock in `ensureGroupDraw()` settles it.
+    await drawWhenTournamentIsFull(result.tournament_id);
+
+    // Drop the cached pages, so the player who lands on the success page
+    // already has a match centre to open.
+    revalidatePath('/', 'page');
+    if (result.tournament_id) {
+      revalidatePath(`/groups/${result.tournament_id}`, 'page');
     }
 
     return NextResponse.json({

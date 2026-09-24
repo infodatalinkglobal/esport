@@ -120,7 +120,7 @@ Scripts: `npm run build`, `npm start`, `npm run typecheck`.
 | `POST /api/register` | Validates the form, checks open / full / duplicate, creates the `pending` registration |
 | `POST /api/paystack/initialize` | Server-side Paystack transaction (amount can't be tampered with); returns the popup code **and** the redirect URL |
 | `POST /api/verify-payment` | Confirms the money with Paystack, marks the registration `paid` |
-| `POST /api/admin/draw-groups` | 🔒 Runs the group draw (see below) |
+| `POST /api/admin/draw-groups` | 🔒 Recovery fallback: draws the groups by hand (they normally draw themselves when the tournament fills) |
 | `POST /api/admin/draw-knockout` | 🔒 Builds the knockout bracket (see below) |
 | `POST /api/submit-result` | Records a group or knockout result, auto-confirms when both players agree |
 
@@ -136,6 +136,8 @@ Row Level Security). All of them use the service-role key on the server only.
 | `lib/supabase.ts` | `supabaseAdmin()` (service role, server only) + `supabase()` (anon, browser) |
 | `lib/paystack.ts` | `initializePayment()`, `verifyPayment()`, popup opener with redirect fallback |
 | `lib/calculations.ts` | `calculatePrizes()` — 15% cut, 70/30 split, integer pesewas |
+| `lib/draw.ts` | `ensureGroupDraw()` — the automatic group draw: idempotent, double-draw safe, rolls itself back on failure |
+| `lib/draw-rules.ts` | `drawDecision()` — the pure rules for when a draw may run (full? already drawn? knockout?) |
 | `lib/groups.ts` | `shufflePlayers()`, `createGroups()`, `generateGroupFixtures()`, `updateStandings()`, `getTopTwo()`, `rankStandings()` |
 | `lib/bracket.ts` | `createKnockoutBracket()`, `pairFirstKnockoutRound()`, `getGroupWinners()`, `checkAndResolveMatch()`, round labels and advancement |
 | `lib/data.ts` | Server-side loaders for tournaments, groups, standings, fixtures, brackets |
@@ -152,7 +154,26 @@ Nothing to do: each player registers on `/` and pays GH₵10 with MoMo. Their ro
 in `registrations` starts as `pending` and flips to `paid` once Paystack
 confirms the money.
 
-### Step 2 — draw the groups
+### Step 2 — the groups are drawn automatically
+
+There is nothing to do: **the draw runs by itself the moment the last slot is
+paid for.** It is triggered by the payment confirmation (the signed webhook and
+the browser callback both go through it) and, as a safety net, by the next
+request for the homepage of a tournament that is already full — so a tournament
+that filled up before this existed, or one whose draw was interrupted, never
+sits waiting for anyone.
+
+The draw is safe to trigger over and over: a duplicate Paystack delivery, the
+browser callback arriving beside it, and several people opening the homepage at
+once all produce **one** set of groups. A database lock on the tournament status
+decides which request does the work, and the unique index on
+`groups (tournament_id, group_name)` means a second draw can never create a
+second Group A. If a draw fails half-way, everything it wrote is rolled back, so
+the next attempt starts clean.
+
+The command below is the **recovery fallback** for the organizer — use it if a
+tournament must be drawn early by hand (it may draw from 6 players up), or if an
+automatic attempt could not be completed:
 
 ```bash
 curl -X POST https://YOUR-DOMAIN/api/admin/draw-groups \
@@ -163,7 +184,7 @@ curl -X POST https://YOUR-DOMAIN/api/admin/draw-groups \
 
 (An `x-admin-secret: YOUR_ADMIN_SECRET` header works too.)
 
-What it does:
+Either way, the draw itself does this:
 
 1. Takes every **paid** player (needs at least 6, supports up to 16).
 2. Shuffles them with Fisher-Yates — a provably fair draw.
@@ -265,7 +286,14 @@ semifinal 2) — or just re-trigger the automatic move by setting the match back
 
 ### Module 2 — group stage
 
-- [ ] `POST /api/admin/draw-groups` without the secret → `401`
+- [ ] With 7 of 8 players paid, `/` shows no groups and the draw has not run
+- [ ] Paying as the 8th player draws the groups automatically (no curl) —
+      `npm test` covers this rule, and Supabase shows the rows within seconds
+- [ ] Reloading `/`, and letting a duplicate Paystack webhook arrive, still
+      leaves exactly 2 groups and 12 fixtures
+- [ ] A full tournament whose draw was interrupted is drawn by the next visit
+      to `/`
+- [ ] `POST /api/admin/draw-groups` without the secret → `401` (recovery route)
 - [ ] With the secret → `{ success: true, groups: [...], fixtures_created: 12 }`
       for 8 players (2 groups × 6 fixtures)
 - [ ] Supabase shows 2 `groups`, 8 `group_members`, 12 `group_matches`,

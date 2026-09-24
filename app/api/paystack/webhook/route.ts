@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { NextResponse } from 'next/server';
 import { verifyPayment } from '@/lib/paystack';
 import { isValidPaystackSignature } from '@/lib/paystack-webhook';
+import { drawWhenTournamentIsFull } from '@/lib/draw';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -60,9 +61,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
   }
 
-  // A new player was just confirmed — drop any cached homepage HTML so the
-  // player count is current even when the customer's browser never came back.
+  // If that payment filled the tournament, draw the groups now (lib/draw.ts).
+  // Paystack retries deliveries, so this runs more than once in practice; the
+  // database lock inside `ensureGroupDraw()` means only one of those runs can
+  // create fixtures, and the others simply confirm the groups are there.
+  await drawWhenTournamentIsFull(result.tournament_id);
+
+  // A new player was just confirmed — drop any cached HTML so the player count
+  // (and the freshly drawn groups page) is current for the next visitor, even
+  // when the customer's browser never came back.
   revalidatePath('/', 'page');
+  if (result.tournament_id) {
+    revalidatePath(`/groups/${result.tournament_id}`, 'page');
+  }
 
   return NextResponse.json({ received: true });
 }
