@@ -15,6 +15,7 @@
 
 import Link from 'next/link';
 import CountdownTimer from '@/components/CountdownTimer';
+import HomeAutoRefresh from '@/components/HomeAutoRefresh';
 import PrizeBreakdown from '@/components/PrizeBreakdown';
 import RegistrationForm from '@/components/RegistrationForm';
 import { calculatePrizes, formatCedis } from '@/lib/calculations';
@@ -173,6 +174,10 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-8">
+      {/* Keeps the player count fresh in tabs the player already has open:
+          refreshes on focus/visibility and polls every 5s while visible. */}
+      <HomeAutoRefresh />
+
       {/* ========================= 1. HERO ============================== */}
       <section aria-labelledby="hero-heading" className="text-center">
         <h1

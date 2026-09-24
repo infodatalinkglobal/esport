@@ -110,9 +110,11 @@ export default async function PaymentSuccessPage({
           Contact organizer on WhatsApp
         </a>
 
-        <Link href="/" className="btn-secondary">
+        {/* Plain <a> (not <Link>): a full document load bypasses the client
+            router cache, so the player always sees the fresh player count. */}
+        <a href="/" className="btn-secondary">
           Back to the tournament
-        </Link>
+        </a>
       </div>
     );
   }
@@ -140,9 +142,11 @@ export default async function PaymentSuccessPage({
           Check payment again
         </Link>
 
-        <Link href="/" className="btn-secondary">
+        {/* Plain <a> (not <Link>): a full document load bypasses the client
+            router cache, so the player always sees the fresh player count. */}
+        <a href="/" className="btn-secondary">
           Back to the tournament
-        </Link>
+        </a>
       </div>
     );
   }
@@ -237,9 +241,12 @@ export default async function PaymentSuccessPage({
           Challenge a friend — join this tournament!
         </a>
 
-        <Link href="/" className="btn-secondary">
+        {/* Plain <a> (not <Link>): a full document load bypasses the client
+            router cache, so the player always sees the updated player count
+            instead of whatever the router has cached from an earlier visit. */}
+        <a href="/" className="btn-secondary">
           Back to the tournament page
-        </Link>
+        </a>
       </section>
     </div>
   );

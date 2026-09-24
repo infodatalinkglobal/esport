@@ -4,6 +4,7 @@
  * blank page. The signed webhook is the independent durable fallback.
  */
 import Link from 'next/link';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { verifyPayment } from '@/lib/paystack';
 import { whatsappLink } from '@/lib/format';
@@ -22,6 +23,10 @@ export default async function PaymentVerifyPage({ searchParams }: Props) {
   if (reference) {
     const result = await verifyPayment(reference);
     if (result.success) {
+      // A new player was just confirmed — drop any cached homepage HTML so
+      // the player count is current for the next visitor (including the
+      // player returning from the success page).
+      revalidatePath('/', 'page');
       redirect(`/payment/success?reference=${encodeURIComponent(reference)}`);
     }
     message =
