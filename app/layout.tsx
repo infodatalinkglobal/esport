@@ -106,6 +106,16 @@ export default function RootLayout({
             >
               Contact organizer on WhatsApp
             </a>
+
+            {/* Quiet link to the organizer's own dashboard (Module 4). */}
+            <p className="mt-3 text-xs text-slate-600">
+              <Link
+                href="/admin"
+                className="rounded underline decoration-white/20 underline-offset-4 hover:text-slate-400"
+              >
+                Organizer login
+              </Link>
+            </p>
           </div>
         </footer>
       </body>

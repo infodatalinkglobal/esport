@@ -743,3 +743,140 @@ export interface ChampionEntry {
   /** Prize actually owed to the runner-up, in pesewas. */
   runner_up_prize: number;
 }
+
+/* ==========================================================================
+ * MODULE 4 (Admin Dashboard)
+ * ========================================================================== */
+
+/**
+ * What the admin API answers when the organizer's secret is checked.
+ * Deliberately carries no data — the call only proves the secret is right.
+ */
+export interface AdminVerifyResponse {
+  ok: true;
+}
+
+/** One tournament in the organizer's tournament picker, with live counts. */
+export interface AdminTournamentSummary {
+  /** The tournament row. */
+  tournament: Tournament;
+  /** Paid players right now. */
+  paid_players: number;
+  /** Registrations still awaiting payment. */
+  pending_players: number;
+}
+
+/** Match counts broken down by status, for one stage of one tournament. */
+export interface AdminMatchCounts {
+  total: number;
+  pending: number;
+  completed: number;
+  disputed: number;
+}
+
+/** Everything the Overview page shows for one tournament. */
+export interface AdminOverview {
+  /** Every tournament, newest first, with live player counts. */
+  tournaments: AdminTournamentSummary[];
+  /** The tournament this overview describes. */
+  tournament: Tournament;
+  /** Paid / pending / failed registration counts. */
+  payment_counts: { paid: number; pending: number; failed: number };
+  /** paid × entry fee, in pesewas. */
+  revenue_pesewas: number;
+  /** The prize split for the paid players so far. */
+  prizes: PrizeBreakdown;
+  /** Group-stage match counts. */
+  group_matches: AdminMatchCounts;
+  /** Knockout match counts. */
+  knockout_matches: AdminMatchCounts;
+  /** Which lifecycle actions are allowed right now, and why not otherwise. */
+  actions: AdminActionAvailability;
+  /** The newest registrations, newest first (private fields included). */
+  recent_registrations: AdminRegistrationRow[];
+}
+
+/** The answer to "can I click this button?" for every lifecycle action. */
+export interface AdminActionAvailability {
+  close_registration: AdminActionState;
+  reopen_registration: AdminActionState;
+  draw_groups: AdminActionState;
+  draw_knockout: AdminActionState;
+  reset_group_stage: AdminActionState;
+  mark_completed: AdminActionState;
+  edit_settings: AdminActionState;
+}
+
+/** One action: allowed, or blocked with a human reason. */
+export interface AdminActionState {
+  allowed: boolean;
+  /** Why the action is blocked — shown under the button. Empty when allowed. */
+  reason: string;
+}
+
+/**
+ * A registration as the organizer sees it: includes the private contact
+ * fields (phone, MoMo, Paystack reference). Only ever sent to a caller that
+ * proved the ADMIN_SECRET.
+ */
+export interface AdminRegistrationRow extends Registration {
+  /** ISO date part of `created_at`, for display. */
+  registered_at: string;
+}
+
+/** One match (group or knockout) as rendered on the admin Matches page. */
+export interface AdminMatchRow {
+  id: string;
+  /** 'group' | 'knockout'. */
+  kind: MatchKind;
+  /** Human label, e.g. 'Group A · Match 2' or 'Semifinal 1'. */
+  label: string;
+  /** Player A's display name. */
+  player_a_name: string;
+  /** Player B's display name. */
+  player_b_name: string;
+  player_a_team: string | null;
+  player_b_team: string | null;
+  player_a_score: number | null;
+  player_b_score: number | null;
+  /** Winner's registration id (null = draw or undecided). */
+  winner_id: string | null;
+  /** Winner's display name once decided, null otherwise. */
+  winner_name: string | null;
+  status: MatchStatus;
+  /** Screenshot storage paths, when players submitted proof. */
+  player_a_screenshot: string | null;
+  player_b_screenshot: string | null;
+  /** Registration ids, for the result-entry form. */
+  player_a_id: string | null;
+  player_b_id: string | null;
+}
+
+/** Body of POST /api/admin/match-result (organizer sets a result). */
+export interface AdminMatchResultPayload {
+  kind: MatchKind;
+  match_id: string;
+  /** Group matches only: player A's score. */
+  score_a?: number;
+  /** Group matches only: player B's score. */
+  score_b?: number;
+  /** Knockout matches only: the winning registration id. */
+  winner_id?: string;
+}
+
+/** Body of POST/PATCH /api/admin/tournaments. */
+export interface AdminTournamentInput {
+  /** PATCH only: the tournament being edited. */
+  id?: string;
+  title?: string;
+  /** Entry fee in pesewas (GH₵10 = 1000). */
+  entry_fee?: number;
+  max_players?: number;
+  /** ISO timestamp — registration closes after this. */
+  registration_deadline?: string;
+  /** ISO timestamp — matches must finish before this. */
+  match_deadline?: string;
+  /** PATCH only: a deliberate status change. */
+  status?: TournamentStatus;
+}
+

@@ -15,8 +15,9 @@ groups of four, and fight their way to the Grand Final.
 | **Module 1** | Foundation + payments (register, pay, verify) | ✅ Built |
 | **Module 2** | Group stage (draw, standings, fixtures, results) | ✅ Built |
 | **Module 3** | Knockout stage + deployment | ✅ Built |
+| **Module 4** | Admin dashboard (`/admin`) | ✅ Built |
 
-All three modules are complete.
+All four modules are complete.
 
 ---
 
@@ -140,6 +141,15 @@ Scripts: `npm run build`, `npm start`, `npm run typecheck`.
 | `POST /api/verify-payment` | Confirms the money with Paystack, marks the registration `paid` |
 | `POST /api/admin/draw-groups` | 🔒 Recovery fallback: draws the groups by hand (they normally draw themselves when the tournament fills) |
 | `POST /api/admin/draw-knockout` | 🔒 Builds the knockout bracket (see below) |
+| `POST /api/admin/verify` | 🔒 The dashboard's login check |
+| `GET /api/admin/overview` | 🔒 Everything the dashboard's Overview tab shows (stats, counts, action availability) |
+| `GET /api/admin/registrations` | 🔒 The full player list, contacts included |
+| `POST /api/admin/registrations/mark-paid` | 🔒 Manual MoMo confirmation (atomic, capacity-checked) |
+| `GET /api/admin/matches` | 🔒 Every group + knockout match, decorated with names |
+| `POST /api/admin/match-result` | 🔒 Set/override a result; settles disputes (updates standings, advances the bracket) |
+| `POST /api/admin/tournaments` | 🔒 Create the next tournament |
+| `PATCH /api/admin/tournaments` | 🔒 Edit title/fee/size/deadlines/status (transition rules enforced) |
+| `POST /api/admin/reset-group-stage` | 🔒 Delete a drawn group stage so it can be redrawn |
 | `POST /api/submit-result` | Records a group or knockout result, auto-confirms when both players agree |
 
 **Why five routes instead of the two in the brief:** the module rules require
@@ -159,12 +169,34 @@ Row Level Security). All of them use the service-role key on the server only.
 | `lib/groups.ts` | `shufflePlayers()`, `createGroups()`, `generateGroupFixtures()`, `updateStandings()`, `getTopTwo()`, `rankStandings()` |
 | `lib/bracket.ts` | `createKnockoutBracket()`, `pairFirstKnockoutRound()`, `getGroupWinners()`, `checkAndResolveMatch()`, round labels and advancement |
 | `lib/data.ts` | Server-side loaders for tournaments, groups, standings, fixtures, brackets |
+| `lib/admin-rules.ts` | The dashboard's pure rules: stats, lifecycle action availability, status transitions, input validation (tested in `tests/admin-rules.test.ts`) |
+| `lib/admin-data.ts` | Server-side loaders for the dashboard (registrations with contacts, matches, overview) |
+| `lib/admin-client.ts` | Browser helper: keeps the secret per tab session and attaches it to dashboard API calls |
 | `lib/validation.ts` | Server-side validation for the registration and result forms |
 | `lib/format.ts` | Cedi/date/phone/WhatsApp helpers and match-status badges |
 
 ---
 
 ## 📋 Running a tournament (admin)
+
+**The easy way: the dashboard.** Open **`/admin`** (there is an "Organizer
+login" link in the site footer) and type your `ADMIN_SECRET`. One screen per
+job:
+
+| Tab | What you do there |
+| --- | --- |
+| **Overview** | Live stats (paid players, revenue, prize split, progress) and every lifecycle action: close/reopen registration, draw groups, draw knockout, reset the group stage, mark completed |
+| **Players** | Every registration with contacts; **Mark paid** for manual MoMo confirmations; WhatsApp links to nudge pending players |
+| **Matches** | Every fixture with scores and screenshots; filter the **disputed** queue and settle it by entering the true result |
+| **Tournament** | Edit deadlines/title/size, change status, and create the next tournament |
+
+The dashboard reuses the same hardened server paths as the automatic flows:
+manual "Mark paid" goes through the atomic capacity-checked
+`mark_registration_paid()` function, and settling a dispute recalculates the
+standings / advances the bracket exactly like an agreed player submission.
+
+Everything the dashboard does is also available as a JSON API (below), so you
+can script it if you ever want to.
 
 ### Step 1 — players register and pay
 
@@ -280,16 +312,29 @@ claims are compared instead:
 
 ### Fixing a disputed match
 
-**Group match:** open **Supabase → Table Editor → group_matches**, correct the
-scores, set `status` to `completed` and `winner_id` to the winner (leave it empty
-for a draw). Then fix the numbers in `group_standings` too, or re-save the match
-in the app to recalculate them.
+**The easy way:** open **`/admin` → Matches**, filter **disputed**, and enter
+the true result — a scoreline for a group match, a winner for a knockout
+match. The league table is recalculated (or the winner advances) for you.
 
-**Knockout match:** open **Supabase → Table Editor → brackets**, set `status` to
-`completed` and `winner_id` to the winner. Then copy that player into the next
-round's row (`player_a_id` for a semifinal 1/2 winner, `player_b_id` for
-semifinal 2) — or just re-trigger the automatic move by setting the match back to
-`pending` with the scores/marker fixed and starting the app's standings recalculation.
+**By hand (API):**
+
+```bash
+# Group match: the agreed scoreline
+curl -X POST https://YOUR-DOMAIN/api/admin/match-result \
+  -H "x-admin-secret: YOUR_ADMIN_SECRET" -H "Content-Type: application/json" \
+  -d '{"kind":"group","match_id":"THE-MATCH-UUID","score_a":2,"score_b":1}'
+
+# Knockout match: the true winner (must be one of the two players)
+curl -X POST https://YOUR-DOMAIN/api/admin/match-result \
+  -H "x-admin-secret: YOUR_ADMIN_SECRET" -H "Content-Type: application/json" \
+  -d '{"kind":"knockout","match_id":"THE-MATCH-UUID","winner_id":"THE-PLAYER-UUID"}'
+```
+
+Results can only be set on `pending`/`disputed` matches — a completed knockout
+match has already moved its winner on, so it is never re-decided (that is what
+protects the bracket). Only a completed group match whose *standings* look wrong
+needs the manual fallback: fix the row in **Supabase → Table Editor →
+group_matches**, then re-save the match in the app to recalculate the table.
 
 ---
 
@@ -371,6 +416,37 @@ semifinal 2) — or just re-trigger the automatic move by setting the match back
 > fixtures per group of four, slot advancement for a whole tournament, champion
 > detection, and no phone numbers leaving the server). Ask if you want the test
 > scripts committed.
+
+### Module 4 — admin dashboard
+
+- [ ] `/admin` without a stored secret → the login card
+- [ ] A wrong secret → "That admin secret is not correct." and the form stays
+- [ ] The right secret → the dashboard, with the active tournament selected
+- [ ] Every admin API call without the secret → `401` (they share one guard)
+- [ ] Overview shows paid/max, pending, revenue and the prize split matching
+      `calculatePrizes()`
+- [ ] Draw-groups button is disabled with a reason below it until 6 have paid
+- [ ] Draw-knockout button is disabled while any group fixture is unfinished
+- [ ] Players tab: search narrows by name/team/phone; "Mark paid" on a pending
+      player flips them to paid and the overview counts update
+- [ ] "Mark paid" on a full tournament → "The tournament is already full" and
+      the row stays unpaid
+- [ ] Matches tab: the disputed filter lists disputed matches; entering a group
+      scoreline recalculates the standings; picking a knockout winner advances
+      them (and completing the Grand Final completes the tournament)
+- [ ] Setting a result on a completed knockout match → refused with the
+      "winner has advanced" message
+- [ ] Tournament tab: creating a cup makes it the advertised one on `/`;
+      the fee field freezes once registration closes
+- [ ] Reset group stage (only while `groups_drawn`) deletes groups, members,
+      fixtures and standings, and reports how many results were destroyed
+- [ ] Logging out and reopening the tab → login card again (sessionStorage)
+- [ ] `npm test` → all admin-rules checks pass (stats, action availability,
+      status transitions, input validation)
+
+> The dashboard's decisions (which buttons, which numbers, which inputs are
+> valid) live in `lib/admin-rules.ts` as pure functions with 20+ automated
+> checks in `tests/admin-rules.test.ts` — no database needed to run them.
 
 ---
 
@@ -492,25 +568,30 @@ Expected until you call `POST /api/admin/draw-groups` — see the admin section 
   the draw response and every page only expose names and DLS team names.
 - All API errors are mapped to friendly messages; raw database errors are logged
   server-side only.
-- The admin endpoint is protected by `ADMIN_SECRET`; with no secret configured it
-  refuses every request rather than allowing an open draw.
+- The admin endpoints (and the whole `/admin` dashboard behind them) are
+  protected by `ADMIN_SECRET`, compared in constant time; with no secret
+  configured they refuse every request rather than allowing an open draw. The
+  dashboard keeps the secret in `sessionStorage` (it dies with the tab) and
+  sends it as the `x-admin-secret` header on every call.
 
 ---
 
 ## 🗺️ Where the project stands
 
-All three modules are built:
+All four modules are built:
 
 | Module | Delivered |
 | --- | --- |
 | 1 | Registration, Paystack payment (popup + redirect fallback), verification, success page, prize pool |
 | 2 | Group draw, standings with full tiebreakers, fixtures, group result submission |
 | 3 | Knockout bracket, knockout result submission, automatic advancement, deployment checklist |
+| 4 | Admin dashboard at `/admin`: overview stats + lifecycle actions, players/payments, match & dispute management, tournament settings and creation |
 
-Deliberately **not** built, per the brief: user logins, an admin dashboard UI,
-leaderboards, in-app chat, automated payouts, multi-tournament UI, push
+Deliberately **not** built, per the brief: user logins,
+leaderboards, in-app chat, automated payouts, push
 notifications, native apps, referee accounts, anti-cheat, waitlists and a 3rd
-place match.
+place match. (The organizer dashboard was originally on that list too — Module 4
+added it once running tournaments by curl and raw SQL got old.)
 
 ### Small things you may want next
 
