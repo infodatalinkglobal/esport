@@ -21,6 +21,7 @@ import RegistrationForm from '@/components/RegistrationForm';
 import { calculatePrizes, formatCedis } from '@/lib/calculations';
 import { formatDateTime } from '@/lib/format';
 import { getActiveTournamentWithStatus, getRegistrationCounts } from '@/lib/data';
+import { ensureGroupDraw } from '@/lib/draw';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 /** Player counts and deadlines change constantly — never cache this page or its data. */
@@ -170,6 +171,35 @@ export default async function HomePage() {
     new Date(tournament.registration_deadline).getTime() < Date.now();
   const isOpen = tournament.status === 'open' && !deadlinePassed;
   const isFull = counts.paid >= tournament.max_players;
+
+  // --------------------------------------------- automatic group draw
+  // A full tournament must never sit waiting for someone to remember the admin
+  // call. Payments draw the groups themselves (see lib/paystack.ts), and this
+  // is the safety net for everything else: a tournament that filled up before
+  // that existed, or one whose draw died half-way. The next fresh request for
+  // this page finishes the job.
+  //
+  // `ensureGroupDraw()` checks the database before it writes anything, so a
+  // tournament that is already drawn costs this page two indexed reads and
+  // nothing else — and it is safe when several requests arrive at once, because
+  // only one of them can win the draw's lock. A page refresh therefore cannot
+  // produce a second set of fixtures.
+  //
+  // A knockout tournament is the one case that cannot need a draw, so it is
+  // skipped without asking (every knockout player came through a group).
+  const knockoutsStarted =
+    tournament.status === 'bracket_drawn' || tournament.status === 'completed';
+
+  if (isFull && !knockoutsStarted) {
+    const outcome = await ensureGroupDraw(tournament.id);
+    if (outcome.drawn) {
+      console.log(
+        `[home] tournament full — drew ${outcome.groups.length} groups and ${outcome.fixtures_created} fixtures`,
+      );
+    } else if (outcome.reason === 'error') {
+      console.error('[home] automatic group draw failed', outcome.error_step);
+    }
+  }
 
   // Prizes are calculated for a FULL tournament (the guaranteed maximum).
   const prizes = calculatePrizes(tournament.max_players, tournament.entry_fee);
