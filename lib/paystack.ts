@@ -275,6 +275,33 @@ export async function verifyPayment(
     };
   }
 
+  // The reference must also be for this tournament's exact charge. This stops
+  // a successful but cheaper/different-currency transaction being credited.
+  const { data: tournament, error: tournamentError } = await client
+    .from('tournaments')
+    .select('entry_fee')
+    .eq('id', registration.tournament_id)
+    .maybeSingle();
+
+  if (
+    tournamentError ||
+    !tournament ||
+    data.currency !== 'GHS' ||
+    data.amount !== tournament.entry_fee
+  ) {
+    console.error('[paystack.verify] amount/currency mismatch', {
+      reference,
+      receivedAmount: data.amount,
+      receivedCurrency: data.currency,
+    });
+    return {
+      success: false,
+      player_name: registration.player_name,
+      tournament_id: registration.tournament_id,
+      error: 'The payment details do not match this tournament. Contact us on WhatsApp.',
+    };
+  }
+
   // 5. Already verified earlier — idempotent, nothing left to do.
   if (registration.payment_status === 'paid') {
     return {
