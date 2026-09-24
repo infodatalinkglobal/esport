@@ -79,12 +79,27 @@ export async function POST(request: Request) {
 
     const { data: tournamentRow } = await supabase
       .from('tournaments')
-      .select('id, title, entry_fee')
+      .select('id, title, entry_fee, max_players')
       .eq('id', registration.tournament_id)
       .maybeSingle();
 
     if (!tournamentRow) {
       return jsonError('That tournament could not be found.', 404);
+    }
+
+    // Re-check the cap right before taking money: the player may have sat on
+    // the form while other slots filled. Payment verification enforces this
+    // again atomically, but refusing here spares them the payment entirely.
+    const { count: paidCount } = await supabase
+      .from('registrations')
+      .select('id', { count: 'exact', head: true })
+      .eq('tournament_id', registration.tournament_id)
+      .eq('payment_status', 'paid');
+
+    if ((paidCount ?? 0) >= (tournamentRow.max_players ?? 0)) {
+      return jsonError('Tournament Full — contact us on WhatsApp', 409, {
+        code: 'full',
+      });
     }
 
     // --- Create the Paystack transaction -----------------------------------
