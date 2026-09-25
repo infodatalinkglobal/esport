@@ -109,3 +109,53 @@
     padding-bottom: calc(1rem + env(safe-area-inset-bottom));
   }
 }
+
+/* =============================================================================
+ * ADMIN DASHBOARD (Module 4) — a deliberately different skin.
+ *
+ * The player site is a dark "night match" theme; the organizer's dashboard is
+ * a light back-office look so the two surfaces never read as the same product.
+ * These primitives are the admin twins of the card, button and field classes
+ * above, and are only used by components/admin and app/admin.
+ * ============================================================================= */
+
+.admin-light {
+  color-scheme: light;
+}
+
+/* Light focus ring (the global one assumes the dark theme). */
+.admin-light :focus-visible {
+  @apply outline-none ring-2 ring-pitch-600 ring-offset-2 ring-offset-slate-100;
+}
+
+@layer components {
+  .acard {
+    @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+  }
+
+  .abtn-primary {
+    @apply flex min-h-tap w-full items-center justify-center gap-2 rounded-lg
+      bg-pitch-600 px-4 py-3 text-base font-semibold text-white shadow-sm
+      transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .abtn-secondary {
+    @apply flex min-h-tap w-full items-center justify-center gap-2 rounded-lg
+      border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-700
+      shadow-sm transition hover:bg-slate-50 active:scale-[0.99]
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .afield {
+    @apply block min-h-tap w-full rounded-lg border border-slate-300 bg-white
+      px-4 py-3 text-base text-slate-900 placeholder:text-slate-400;
+  }
+
+  .afield-label {
+    @apply mb-1.5 block text-sm font-medium text-slate-600;
+  }
+
+  .abadge {
+    @apply inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+}

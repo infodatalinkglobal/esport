@@ -1,19 +1,17 @@
 /**
  * Root layout — the shell every page renders inside.
  *
- * It provides only what Module 1 needs:
- * - mobile-first viewport settings
- * - a compact top bar with the platform name
- * - a footer whose only content is the WhatsApp contact link
+ * It is deliberately minimal: html, body, global styles, the skip link. The
+ * player-facing chrome (top bar, footer) lives in `app/(site)/layout.tsx`, and
+ * the admin dashboard brings its own chrome in `app/admin/layout.tsx` — so the
+ * two halves of the app never render inside each other's navigation.
  *
  * System fonts are used (see globals.css), so there are no external font
  * requests to slow the first paint down.
  */
 
 import type { Metadata, Viewport } from 'next';
-import Link from 'next/link';
 import './globals.css';
-import { whatsappLink } from '@/lib/format';
 
 /** Metadata used by browsers, tabs and link previews. */
 export const metadata: Metadata = {
@@ -54,60 +52,7 @@ export default function RootLayout({
         >
           Skip to content
         </a>
-
-        <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/90 backdrop-blur">
-          <div className="mx-auto flex max-w-3xl items-center justify-between gap-2 px-4 py-2">
-            <Link
-              href="/"
-              className="flex min-h-tap items-center whitespace-nowrap text-sm font-bold tracking-tight sm:text-base"
-            >
-              DLS <span className="ml-1 text-pitch-400">Tournament GH</span>
-            </Link>
-
-            <nav aria-label="Main navigation">
-              <ul className="flex items-center">
-                {/* My Matches: the player's personal fixtures/results view. */}
-                <li>
-                  <Link
-                    href="/my-matches"
-                    className="flex min-h-tap items-center rounded-lg px-2 text-sm font-medium text-slate-300 active:bg-white/5 sm:px-3"
-                  >
-                    My Matches
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href="/submit-result"
-                    className="flex min-h-tap items-center rounded-lg px-2 text-sm font-medium text-slate-300 active:bg-white/5 sm:px-3"
-                  >
-                    Submit Result
-                  </Link>
-                </li>
-              </ul>
-            </nav>
-          </div>
-        </header>
-
-        <main id="main" className="mx-auto max-w-3xl px-4 pb-8 pt-4">
-          {children}
-        </main>
-
-        {/* Footer: WhatsApp contact link only, as specified. */}
-        <footer className="mt-6 border-t border-white/10 px-4 py-6 safe-bottom">
-          <div className="mx-auto max-w-3xl text-center">
-            <a
-              href={whatsappLink(
-                undefined,
-                'Hi! I have a question about the DLS tournament.',
-              )}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex min-h-tap items-center justify-center gap-2 rounded-xl border border-pitch-500/40 bg-pitch-500/10 px-4 py-3 text-base font-semibold text-pitch-400"
-            >
-              Contact organizer on WhatsApp
-            </a>
-          </div>
-        </footer>
+        {children}
       </body>
     </html>
   );

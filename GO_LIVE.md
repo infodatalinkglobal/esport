@@ -18,9 +18,13 @@ this file is the shortest correct path.
 1. Open your project → **SQL Editor → New query**
 2. Paste the whole of `setup.sql` → **RUN** (creates 7 tables, RLS, the
    `mark_registration_paid()` function, the storage bucket, one starter tournament)
-3. If you had run an **older** `setup.sql` on this project before, also run
-   `supabase/migrations/20260924000000_security_and_payment_hardening.sql` once
-   (idempotent — running it on a fresh project is harmless too)
+3. If you had run an **older** `setup.sql` on this project before, also run the
+   two newer migrations once (both idempotent — running them on a fresh
+   project is harmless too):
+   - `supabase/migrations/20260924000000_security_and_payment_hardening.sql`
+     (closes the "insert yourself as paid" hole, atomic capacity-checked payments)
+   - `supabase/migrations/20260925000000_refunded_status.sql`
+     (adds the `refunded` payment status the admin dashboard's refund action writes)
 4. Copy three values from **Project Settings → API**:
    - Project URL → `NEXT_PUBLIC_SUPABASE_URL`
    - anon `public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -35,7 +39,7 @@ this file is the shortest correct path.
    ```bash
    openssl rand -hex 24
    ```
-   → `ADMIN_SECRET` (protects the two admin draw endpoints)
+   → `ADMIN_SECRET` (the password for the `/admin` dashboard AND the admin API)
 
 ## 3. Deploy (Vercel)
 

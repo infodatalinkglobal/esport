@@ -535,11 +535,15 @@ async function currentMatchResolution(
  * Moves a confirmed winner into their next-round slot, or finishes the
  * tournament if they just won the Grand Final.
  *
+ * Exported for the admin dashboard's result endpoint (Module 4): when the
+ * organizer settles a disputed semifinal by hand, the winner must advance
+ * exactly the way an agreed player submission would have moved them.
+ *
  * @param match The match that was just completed.
  * @param winnerId The confirmed winner.
  * @returns Nothing. Failures are logged; the result itself is already saved.
  */
-async function advanceWinner(match: Bracket, winnerId: string): Promise<void> {
+export async function advanceWinner(match: Bracket, winnerId: string): Promise<void> {
   try {
     const supabase = supabaseAdmin();
 
