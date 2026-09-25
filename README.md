@@ -367,6 +367,9 @@ group_matches**, then re-save the match in the app to recalculate the table.
 - [ ] Paying (test mode) lands on `/payment/success` and flips the row to `paid`
 - [ ] Checking `/payment/verify` while a MoMo prompt is still open → "still
       being confirmed", and the row stays `pending` (never `failed`)
+- [ ] Tap Pay, close the popup, tap Pay again and pay; then reopen the FIRST
+      attempt's `/payment/verify?reference=…` → "already confirmed", and the
+      row stays `paid`
 - [ ] Registering the same number twice → "You are already registered"
 - [ ] `status = closed` → "Registration is now closed"
 - [ ] 8 `paid` rows → "Tournament Full — contact us on WhatsApp"
@@ -452,7 +455,9 @@ group_matches**, then re-save the match in the app to recalculate the table.
       them (and completing the Grand Final completes the tournament)
 - [ ] Players tab → Refund on a paid player (pre-draw): manual mode marks the
       row `refunded`, the slot frees up, and the paid count drops; Paystack
-      mode returns a friendly error for manual MoMo payments
+      mode returns a friendly error for manual MoMo payments. Reopening that
+      player's `/payment/verify?reference=…` afterwards says "refunded" and
+      the row stays `refunded`
 - [ ] Players tab → Edit: fix a name/team/number inline; a duplicate WhatsApp
       number is refused with the other player's name
 - [ ] Players tab → Broadcast: select players, write a message, "Copy for

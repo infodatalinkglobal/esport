@@ -165,7 +165,12 @@ export type VerifyFailureCode =
   | 'payment_failed'
   | 'amount_mismatch'
   | 'update_failed'
-  | 'tournament_full';
+  | 'tournament_full'
+  /** This transaction did not succeed, but the registration is already paid
+   *  (usually an older, abandoned attempt) — nothing to do, nothing changed. */
+  | 'already_paid'
+  /** The registration was refunded by the organizer; it is left untouched. */
+  | 'refunded';
 
 export interface VerifyPaymentResult {
   success: boolean;
@@ -185,6 +190,19 @@ export interface VerifyPaymentResult {
  * This is the only place where money turns into a confirmed registration, so it
  * is used by `/api/verify-payment`, the `/payment/verify` callback page and the
  * signed webhook.
+ *
+ * It runs for ANY reference anyone presents (an old browser tab, a retried
+ * webhook), so it only ever moves a registration FORWARD:
+ *   - 'paid' is never downgraded, whatever an older attempt's reference says;
+ *   - 'refunded' is never touched — the organizer settled it, and re-checking
+ *     the original transaction must not undo that;
+ *   - 'failed' is only written for the registration's CURRENT reference, and
+ *     only while the row is still 'pending'.
+ *
+ * Why an older reference can arrive at all: /api/paystack/initialize issues a
+ * fresh reference on every "Pay" tap and stores only the newest on the row.
+ * The older ones are still found through the transaction's metadata, which
+ * matters when a late payment on them succeeds — that money is real.
  *
  * @param reference The Paystack reference to verify.
  * @param supabase Optional service-role client (created on demand when omitted).
@@ -269,6 +287,14 @@ export async function verifyPayment(
 
   registration = byReference.data;
 
+  /**
+   * 'reference' — this IS the registration's current payment attempt.
+   * 'metadata'  — an OLDER attempt: the player tapped "Pay" again since, so
+   *               the row now carries a newer reference. It may still credit a
+   *               late payment, but must never overwrite the newer attempt.
+   */
+  let foundBy: 'reference' | 'metadata' = 'reference';
+
   // 3. Safety net: if the reference is unknown, fall back to the registration
   //    id we attach as metadata when the transaction is created.
   if (!registration) {
@@ -280,6 +306,7 @@ export async function verifyPayment(
         .eq('id', metadataId)
         .maybeSingle();
       registration = byMetadata.data ?? null;
+      foundBy = 'metadata';
     }
   }
 
@@ -293,16 +320,68 @@ export async function verifyPayment(
     };
   }
 
-  // 4. Paystack says the payment has not succeeded (yet).
+  // 4. A refunded registration is settled history — leave it alone. Its
+  //    original transaction can resurface at any time (an old /payment/verify
+  //    tab, a webhook retry), and acting on it would undo the refund: a MoMo
+  //    refund paid by hand leaves the transaction 'success' (it would be
+  //    re-credited, taking a slot the organizer freed), and a refund processed
+  //    by Paystack turns it 'reversed' (it would be overwritten as 'failed').
+  if (registration.payment_status === 'refunded') {
+    console.warn('[paystack.verify] reference belongs to a refunded registration — left unchanged', {
+      reference,
+      registration_id: registration.id,
+      paystack_status: data.status,
+    });
+    return {
+      success: false,
+      player_name: registration.player_name,
+      tournament_id: registration.tournament_id,
+      error:
+        'This registration was refunded, so it is no longer active. Contact us on WhatsApp if you think this is wrong.',
+      code: 'refunded',
+    };
+  }
+
+  // 5. Paystack says the payment has not succeeded (yet).
   if (data.status !== 'success') {
+    // A confirmed slot is never downgraded here. Normally this is an older,
+    // abandoned attempt; the only way the CURRENT reference of a paid row stops
+    // being 'success' is a refund or reversal done outside the dashboard,
+    // which is the organizer's call, not an anonymous page view's.
+    if (registration.payment_status === 'paid') {
+      if (foundBy === 'reference') {
+        console.error(
+          `[paystack.verify] the transaction that paid for this registration is now "${data.status}" — check it in Paystack and settle the registration in the admin dashboard`,
+          { reference, registration_id: registration.id },
+        );
+      }
+      return {
+        success: false,
+        player_name: registration.player_name,
+        tournament_id: registration.tournament_id,
+        error:
+          'Your registration is already confirmed — you do not need to pay again. Contact us on WhatsApp if anything looks wrong.',
+        code: 'already_paid',
+      };
+    }
+
     if (TERMINAL_FAILURE_STATUSES.has(data.status)) {
       // Genuinely dead — record the failure so the player can register again;
       // the phone-number slot is freed up because the unique index applies per
       // tournament only.
-      await client
-        .from('registrations')
-        .update({ payment_status: 'failed' })
-        .eq('id', registration.id);
+      //
+      // Only for the CURRENT attempt, and only while nothing has confirmed the
+      // row: an older attempt dying says nothing about the newer one, and the
+      // conditions make the write a no-op if a payment or a new "Pay" tap
+      // landed after we read the row.
+      if (foundBy === 'reference') {
+        await client
+          .from('registrations')
+          .update({ payment_status: 'failed' })
+          .eq('id', registration.id)
+          .eq('paystack_reference', reference)
+          .eq('payment_status', 'pending');
+      }
 
       return {
         success: false,
@@ -355,8 +434,15 @@ export async function verifyPayment(
     };
   }
 
-  // 5. Already verified earlier — idempotent, nothing left to do.
+  // 6. Already verified earlier — idempotent, nothing left to do.
   if (registration.payment_status === 'paid') {
+    if (foundBy === 'metadata') {
+      // An older attempt ALSO succeeded: the player paid twice for one slot.
+      console.warn(
+        '[paystack.verify] second successful payment for an already-paid registration — refund one of them in Paystack',
+        { reference, registration_id: registration.id },
+      );
+    }
     return {
       success: true,
       player_name: registration.player_name,
@@ -364,7 +450,7 @@ export async function verifyPayment(
     };
   }
 
-  // 6. Claim the slot — atomically and capacity-checked. The database function
+  // 7. Claim the slot — atomically and capacity-checked. The database function
   //    locks the tournament row while it counts paid players, so two payments
   //    confirming at the same instant can never oversell a full tournament.
   //    It returns false when the tournament is full: the money is real, but the
@@ -397,7 +483,7 @@ export async function verifyPayment(
     };
   }
 
-  // 7. Fallback for databases that have not run the hardening migration yet:
+  // 8. Fallback for databases that have not run the hardening migration yet:
   //    count first, then a conditional update. Not perfectly atomic, but far
   //    better than an unconditional write, and it keeps verification working.
   const isMissingFunction =
@@ -430,7 +516,8 @@ export async function verifyPayment(
       .from('registrations')
       .update({ payment_status: 'paid', paystack_reference: data.reference })
       .eq('id', registration.id)
-      .neq('payment_status', 'paid')
+      // Only an unconfirmed row can be claimed — never a refunded one.
+      .in('payment_status', ['pending', 'failed'])
       .select('id');
 
     if (updateError) {
@@ -446,12 +533,24 @@ export async function verifyPayment(
     }
 
     if (!updatedRows || updatedRows.length === 0) {
-      // Someone else confirmed this registration between our read and write.
-      return {
-        success: true,
-        player_name: registration.player_name,
-        tournament_id: registration.tournament_id,
-      };
+      // The row changed between our read and our write. That is only a
+      // success if the change was another request confirming it.
+      const { data: current } = await client
+        .from('registrations')
+        .select('payment_status')
+        .eq('id', registration.id)
+        .maybeSingle();
+
+      if (current?.payment_status !== 'paid') {
+        return {
+          success: false,
+          player_name: registration.player_name,
+          tournament_id: registration.tournament_id,
+          error:
+            'Payment received but we could not confirm it. Contact us on WhatsApp.',
+          code: 'update_failed',
+        };
+      }
     }
 
     return {
