@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { AdminMatchRow, MatchStatus } from '@/types';
+import type { AdminGroupStandings, AdminMatchRow, MatchStatus } from '@/types';
 import { useAdmin } from '@/components/admin/admin-context';
 import { Banner, MatchBadge } from '@/components/admin/ui';
 import { adminFetch, downloadCsv } from '@/lib/admin-client';
@@ -30,6 +30,96 @@ interface ResultFormState {
   winner_id: string;
 }
 
+/* ------------------------------------------------------------------ BracketView */
+
+/** Props for {@link BracketView}. */
+interface BracketViewProps {
+  /** The tournament's knockout matches (kind: 'knockout'). */
+  matches: AdminMatchRow[];
+}
+
+/**
+ * A compact, phone-friendly knockout bracket: the semifinals side by side
+ * (stacked on small screens) feeding the Grand Final, winners in green and
+ * the champion crowned. One glance at the road to the trophy.
+ *
+ * @param props See {@link BracketViewProps}.
+ */
+function BracketView({ matches }: BracketViewProps) {
+  const byLabel = (needle: string) => matches.find((match) => match.label === needle);
+  const semifinalOne = byLabel('Semifinal 1');
+  const semifinalTwo = byLabel('Semifinal 2');
+  const grandFinal = byLabel('Grand Final');
+
+  /**
+   * One slot in the bracket: a player name, green when they won this match.
+   *
+   * @param name The player's name (or a placeholder).
+   * @param won True when this slot's player is the confirmed winner.
+   */
+  const slot = (name: string, won: boolean) => (
+    <p
+      className={`truncate rounded-lg px-3 py-2 text-sm ${
+        won
+          ? 'bg-emerald-50 font-bold text-emerald-800'
+          : 'bg-slate-50 font-medium text-slate-700'
+      }`}
+    >
+      {name}
+    </p>
+  );
+
+  /**
+   * One match card: both slots plus a status line.
+   *
+   * @param title The match label, e.g. 'Semifinal 1'.
+   * @param match The match row (may be missing if the bracket is partial).
+   */
+  const matchCard = (title: string, match?: AdminMatchRow) => (
+    <div className="acard flex flex-1 flex-col gap-2 p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</p>
+      {match ? (
+        <>
+          {slot(match.player_a_name, match.status === 'completed' && match.winner_id === match.player_a_id)}
+          {slot(match.player_b_name, match.status === 'completed' && match.winner_id === match.player_b_id)}
+          <p className="text-xs text-slate-500">
+            {match.status === 'completed'
+              ? '✅ decided'
+              : match.status === 'disputed'
+                ? '⚖️ disputed — settle below'
+                : '⏳ waiting for a result'}
+          </p>
+        </>
+      ) : (
+        <p className="text-sm text-slate-400">Not drawn yet</p>
+      )}
+    </div>
+  );
+
+  const champion =
+    grandFinal?.status === 'completed' && grandFinal.winner_name ? grandFinal.winner_name : null;
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div className="flex w-full flex-col gap-3 sm:flex-row">
+        {matchCard('Semifinal 1', semifinalOne)}
+        {matchCard('Semifinal 2', semifinalTwo)}
+      </div>
+      <p aria-hidden="true" className="text-slate-400">
+        ↘ <span className="sr-only">winners advance to the</span> ↓
+      </p>
+      <div className="flex w-full flex-col gap-3 sm:w-2/3">
+        {matchCard('Grand Final 🏆', grandFinal)}
+        {champion ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-sm font-bold text-emerald-800">
+            👑 Champion: {champion}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * The Matches page.
  *
@@ -38,6 +128,7 @@ interface ResultFormState {
 export default function AdminMatchesPage() {
   const { secret, selectedId, logout } = useAdmin();
   const [matches, setMatches] = useState<AdminMatchRow[]>([]);
+  const [standings, setStandings] = useState<AdminGroupStandings[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
@@ -50,10 +141,10 @@ export default function AdminMatchesPage() {
   const load = useCallback(async () => {
     if (!secret || !selectedId) return;
     setLoading(true);
-    const result = await adminFetch<{ matches: AdminMatchRow[] }>(
-      `/api/admin/matches?tournament_id=${encodeURIComponent(selectedId)}`,
-      secret,
-    );
+    const result = await adminFetch<{
+      matches: AdminMatchRow[];
+      standings: AdminGroupStandings[];
+    }>(`/api/admin/matches?tournament_id=${encodeURIComponent(selectedId)}`, secret);
     setLoading(false);
 
     if (result.status === 401) {
@@ -66,10 +157,12 @@ export default function AdminMatchesPage() {
     }
     setFailed(null);
     setMatches(result.data.matches);
+    setStandings(result.data.standings ?? []);
   }, [secret, selectedId, logout]);
 
   useEffect(() => {
     setMatches([]);
+    setStandings([]);
     void load();
   }, [load]);
 
@@ -225,6 +318,107 @@ export default function AdminMatchesPage() {
       </div>
 
       {banner ? <Banner tone={banner.tone}>{banner.text}</Banner> : null}
+
+      {/* --- Group standings (the league tables, as players see them) ------ */}
+      {standings.length > 0 ? (
+        <section aria-labelledby="standings-heading" className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2
+              id="standings-heading"
+              className="text-sm font-bold uppercase tracking-wide text-slate-500"
+            >
+              Group standings
+            </h2>
+            <a
+              href={`/groups/${selectedId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-semibold text-pitch-700 underline decoration-pitch-300 underline-offset-2"
+            >
+              Open the player view ↗
+            </a>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {standings.map((group) => (
+              <div key={group.group_id} className="acard overflow-x-auto p-0">
+                <table className="w-full min-w-[24rem] text-left text-sm">
+                  <caption className="px-4 pt-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Group {group.group_name}
+                  </caption>
+                  <thead>
+                    <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                      <th scope="col" className="px-4 py-2 font-semibold">#</th>
+                      <th scope="col" className="px-2 py-2 font-semibold">Player</th>
+                      <th scope="col" className="px-2 py-2 text-center font-semibold">P</th>
+                      <th scope="col" className="px-2 py-2 text-center font-semibold">W</th>
+                      <th scope="col" className="px-2 py-2 text-center font-semibold">D</th>
+                      <th scope="col" className="px-2 py-2 text-center font-semibold">L</th>
+                      <th scope="col" className="px-2 py-2 text-center font-semibold">GD</th>
+                      <th scope="col" className="px-4 py-2 text-right font-semibold">Pts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.rows.map((row) => (
+                      <tr
+                        key={row.player_id}
+                        className={`border-b border-slate-100 last:border-0 ${
+                          row.advances ? 'bg-emerald-50/60' : ''
+                        }`}
+                      >
+                        <td className="px-4 py-2 font-bold tabular-nums text-slate-500">
+                          {row.advances ? '✅' : ''} {row.position}
+                        </td>
+                        <td className="px-2 py-2">
+                          <span className="font-semibold text-slate-900">{row.player_name}</span>
+                          <span className="block text-xs text-slate-500">{row.dls_team_name}</span>
+                        </td>
+                        <td className="px-2 py-2 text-center tabular-nums text-slate-600">{row.played}</td>
+                        <td className="px-2 py-2 text-center tabular-nums text-slate-600">{row.won}</td>
+                        <td className="px-2 py-2 text-center tabular-nums text-slate-600">{row.drawn}</td>
+                        <td className="px-2 py-2 text-center tabular-nums text-slate-600">{row.lost}</td>
+                        <td className="px-2 py-2 text-center tabular-nums text-slate-600">
+                          {row.goal_difference > 0 ? '+' : ''}
+                          {row.goal_difference}
+                        </td>
+                        <td className="px-4 py-2 text-right font-extrabold tabular-nums text-slate-900">
+                          {row.points}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500">
+            ✅ top two of each group advance to the knockout stage — ranked exactly like the
+            player page (points → goal difference → goals scored → head-to-head).
+          </p>
+        </section>
+      ) : null}
+
+      {/* --- The knockout bracket ------------------------------------------- */}
+      {matches.some((match) => match.kind === 'knockout') ? (
+        <section aria-labelledby="bracket-heading" className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2
+              id="bracket-heading"
+              className="text-sm font-bold uppercase tracking-wide text-slate-500"
+            >
+              Knockout bracket
+            </h2>
+            <a
+              href={`/bracket/${selectedId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-semibold text-pitch-700 underline decoration-pitch-300 underline-offset-2"
+            >
+              Open the player view ↗
+            </a>
+          </div>
+          <BracketView matches={matches.filter((match) => match.kind === 'knockout')} />
+        </section>
+      ) : null}
 
       {/* Filter chips */}
       <div role="tablist" aria-label="Filter by status" className="flex flex-wrap gap-2">

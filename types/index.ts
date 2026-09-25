@@ -857,6 +857,16 @@ export interface AdminMatchRow {
   player_b_id: string | null;
 }
 
+/** One group's league table for the admin Matches page (Module 4). */
+export interface AdminGroupStandings {
+  /** The `groups.id` the table belongs to. */
+  group_id: string;
+  /** 'A' | 'B' | 'C' | 'D'. */
+  group_name: string;
+  /** The ranked rows (position + advances flag included). */
+  rows: StandingRow[];
+}
+
 /** Body of POST /api/admin/match-result (organizer sets a result). */
 export interface AdminMatchResultPayload {
   kind: MatchKind;

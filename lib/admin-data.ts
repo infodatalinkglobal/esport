@@ -13,6 +13,7 @@
  */
 
 import type {
+  AdminGroupStandings,
   AdminMatchRow,
   AdminOverview,
   AdminRegistrationRow,
@@ -20,12 +21,15 @@ import type {
   Bracket,
   Group,
   GroupMatch,
+  GroupStanding,
   Registration,
+  StandingRow,
   Tournament,
 } from '@/types';
 import { isSupabaseConfigured, supabaseAdmin } from './supabase';
 import { calculatePrizes } from './calculations';
 import { knockoutMatchLabel } from './bracket';
+import { rankStandings } from './groups';
 import {
   adminActionAvailability,
   countMatches,
@@ -319,6 +323,72 @@ export async function getAdminMatches(
     return rows;
   } catch (error) {
     console.error('[admin-data.getAdminMatches]', error);
+    return null;
+  }
+}
+
+/**
+ * The group standings for one tournament, ranked exactly the way the public
+ * groups page ranks them (points → goal difference → goals for → head-to-head)
+ * — so the organizer sees the same league tables inside the dashboard without
+ * leaving for the player site.
+ *
+ * @param tournamentId The tournament's UUID.
+ * @returns One entry per group with its ranked rows, or null on failure
+ *          (and an empty array before the draw has happened).
+ */
+export async function getAdminStandings(
+  tournamentId: string,
+): Promise<AdminGroupStandings[] | null> {
+  if (!isSupabaseConfigured() || !tournamentId) return null;
+
+  try {
+    const supabase = supabaseAdmin();
+
+    const [{ data: groupRows }, { data: standingRows }, { data: matchRows }, { data: playerRows }] =
+      await Promise.all([
+        supabase.from('groups').select('*').eq('tournament_id', tournamentId).order('group_name'),
+        supabase.from('group_standings').select('*').eq('tournament_id', tournamentId),
+        supabase.from('group_matches').select('*').eq('tournament_id', tournamentId),
+        supabase
+          .from('registrations')
+          .select('id, player_name, dls_team_name')
+          .eq('tournament_id', tournamentId),
+      ]);
+
+    const groups = (groupRows ?? []) as Group[];
+    if (groups.length === 0) return [];
+
+    const standings = (standingRows ?? []) as GroupStanding[];
+    const matches = (matchRows ?? []) as GroupMatch[];
+    const players = new Map(
+      ((playerRows ?? []) as Array<{
+        id: string;
+        player_name: string;
+        dls_team_name: string;
+      }>).map((row) => [row.id, row]),
+    );
+
+    return groups.map((group) => {
+      // Decorate the bare standings rows with names, then rank them.
+      const decorated = standings
+        .filter((row) => row.group_id === group.id)
+        .map((row) => ({
+          ...row,
+          player_name: players.get(row.player_id)?.player_name ?? 'Unknown player',
+          dls_team_name: players.get(row.player_id)?.dls_team_name ?? '',
+        }));
+
+      const rows: StandingRow[] = rankStandings(decorated, matches);
+
+      return {
+        group_id: group.id,
+        group_name: group.group_name,
+        rows,
+      };
+    });
+  } catch (error) {
+    console.error('[admin-data.getAdminStandings]', error);
     return null;
   }
 }
