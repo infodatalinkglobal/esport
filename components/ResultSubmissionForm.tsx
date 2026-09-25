@@ -29,15 +29,15 @@
 import { useMemo, useState } from 'react';
 import type { ResultSubmissionFormProps } from '@/types';
 import { normalizePhone, whatsappLink } from '@/lib/format';
+import {
+  MAX_SCREENSHOT_BYTES,
+  SCREENSHOT_BUCKET,
+  buildScreenshotPath,
+  screenshotContentType,
+} from '@/lib/screenshots';
 
 /** Which tab is open. */
 type Tab = 'group' | 'knockout';
-
-/** Largest screenshot we accept, in bytes (matches the storage policy). */
-const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
-
-/** Image types the storage bucket and the brief allow (jpg, png, webp). */
-const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
 /** What the form tells the player after a successful submission. */
 interface Outcome {
@@ -117,28 +117,45 @@ export default function ResultSubmissionForm({
       );
     }
 
-    const extension =
-      selected.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') ||
-      'jpg';
-    const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const path = `${tournamentId ?? 'unknown'}/${matchId}/${unique}.${extension}`;
+    // The object name and content type must match what the bucket's upload
+    // policy and settings accept — see lib/screenshots.ts.
+    const contentType = screenshotContentType(selected.type);
+    const path = buildScreenshotPath({ tournamentId, matchId, contentType });
+    if (!contentType || !path) {
+      throw new Error(
+        'We could not prepare your screenshot upload. Refresh the page and try again.',
+      );
+    }
+
+    // supabase-js sends a File as multipart form data and IGNORES the
+    // `contentType` option for it: the storage server sees the file's own
+    // type. Re-label the file with the normalised type (e.g. a phone's
+    // non-standard "image/jpg" → "image/jpeg") so the bucket's type check
+    // passes. slice() shares the bytes — nothing is copied.
+    const body =
+      selected.type === contentType
+        ? selected
+        : selected.slice(0, selected.size, contentType);
 
     const { error: uploadError } = await client.storage
-      .from('result-screenshots')
-      .upload(path, selected, {
+      .from(SCREENSHOT_BUCKET)
+      .upload(path, body, {
         cacheControl: '3600',
         upsert: false,
-        contentType: selected.type || 'image/jpeg',
+        contentType,
       });
 
     if (uploadError) {
+      // Size and type were already checked above, so this is the network or
+      // the storage settings — keep the real reason in the browser console.
+      console.error('[screenshot upload] failed', uploadError);
       throw new Error(
-        'We could not upload your screenshot. Use a smaller image (under 5MB) and try again.',
+        'We could not upload your screenshot. Check your connection and try again — if it keeps failing, send the screenshot to the organizer on WhatsApp.',
       );
     }
 
     const { data } = client.storage
-      .from('result-screenshots')
+      .from(SCREENSHOT_BUCKET)
       .getPublicUrl(path);
 
     if (!data?.publicUrl) {
@@ -197,7 +214,7 @@ export default function ResultSubmissionForm({
       setError('Screenshot is required as proof of your result.');
       return;
     }
-    if (!ALLOWED_TYPES.includes(file.type.toLowerCase())) {
+    if (!screenshotContentType(file.type)) {
       setError('Please upload a JPG, PNG or WebP screenshot.');
       return;
     }

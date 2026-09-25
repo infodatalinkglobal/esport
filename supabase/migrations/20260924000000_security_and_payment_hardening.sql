@@ -16,7 +16,8 @@
 --      longer oversell a full tournament. Locked down to the service role.
 --   3. The screenshot upload policy now requires the storage path to have the
 --      exact shape the app writes, so the bucket can't be used as anonymous
---      file storage.
+--      file storage; the bucket itself limits type (JPG/PNG/WebP) and size
+--      (5 MB).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -103,12 +104,18 @@ grant execute on function public.mark_registration_paid(uuid, text) to service_r
 -- -----------------------------------------------------------------------------
 -- 3. Screenshots: uploads must look like what the app writes
 -- -----------------------------------------------------------------------------
+-- Corrected on 2026-09-25 (see 20260925120000_fix_screenshot_uploads.sql): the
+-- first version of this policy refused every upload. This file now carries the
+-- working version too, so hand re-running it can never re-break uploads.
+update storage.buckets
+set file_size_limit = 5242880,
+    allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp']
+where id = 'result-screenshots';
+
 drop policy if exists "Public can upload screenshots" on storage.objects;
 create policy "Public can upload screenshots"
   on storage.objects for insert
   with check (
     bucket_id = 'result-screenshots'
-    and coalesce(metadata->>'mimetype', '') like 'image/%'
-    and coalesce((metadata->>'size')::bigint, 0) between 1 and 5242880
-    and name ~* '^result-screenshots/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-z-]+\.(jpg|jpeg|png|webp)$'
+    and name ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-z-]+\.(jpg|jpeg|png|webp)$'
   );

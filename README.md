@@ -42,6 +42,13 @@ This creates all 7 tables, the indexes, the Row Level Security policies, the
 > you upgrade to Pro — preview branches spawn a database per pull request and are
 > billed hourly.
 >
+> **Already have a live database? Run the screenshot-upload fix.** Every
+> database set up before 25 September 2026, including from `setup.sql`,
+> refuses **all** screenshot uploads, so no player can submit a result. Run
+> `supabase/migrations/20260925120000_fix_screenshot_uploads.sql` once (SQL
+> Editor → paste → RUN, or let the GitHub integration apply it). New setups
+> get it from `setup.sql`.
+>
 > **Already have a live database from before the admin dashboard?** Also run
 > `supabase/migrations/20260925000000_refunded_status.sql` once (it adds the
 > `refunded` payment status the dashboard's refund action writes).
@@ -178,6 +185,7 @@ Row Level Security). All of them use the service-role key on the server only.
 | `lib/admin-data.ts` | Server-side loaders for the dashboard (registrations with contacts, matches, overview) |
 | `lib/admin-client.ts` | Browser helper: keeps the secret per tab session and attaches it to dashboard API calls |
 | `lib/validation.ts` | Server-side validation for the registration and result forms |
+| `lib/screenshots.ts` | Where a result screenshot is stored (`<tournament>/<match>/<file>`) and which types it is sent as — checked against the storage policy in every SQL file by `tests/screenshot-upload.test.ts` |
 | `lib/format.ts` | Cedi/date/phone/WhatsApp helpers and match-status badges |
 
 ---
@@ -359,6 +367,9 @@ group_matches**, then re-save the match in the app to recalculate the table.
 - [ ] Paying (test mode) lands on `/payment/success` and flips the row to `paid`
 - [ ] Checking `/payment/verify` while a MoMo prompt is still open → "still
       being confirmed", and the row stays `pending` (never `failed`)
+- [ ] Tap Pay, close the popup, tap Pay again and pay; then reopen the FIRST
+      attempt's `/payment/verify?reference=…` → "already confirmed", and the
+      row stays `paid`
 - [ ] Registering the same number twice → "You are already registered"
 - [ ] `status = closed` → "Registration is now closed"
 - [ ] 8 `paid` rows → "Tournament Full — contact us on WhatsApp"
@@ -444,7 +455,9 @@ group_matches**, then re-save the match in the app to recalculate the table.
       them (and completing the Grand Final completes the tournament)
 - [ ] Players tab → Refund on a paid player (pre-draw): manual mode marks the
       row `refunded`, the slot frees up, and the paid count drops; Paystack
-      mode returns a friendly error for manual MoMo payments
+      mode returns a friendly error for manual MoMo payments. Reopening that
+      player's `/payment/verify?reference=…` afterwards says "refunded" and
+      the row stays `refunded`
 - [ ] Players tab → Edit: fix a name/team/number inline; a duplicate WhatsApp
       number is refused with the other player's name
 - [ ] Players tab → Broadcast: select players, write a message, "Copy for
@@ -510,15 +523,19 @@ still points at `localhost`, payments will not return to your confirmation page.
 - [ ] The security hardening has been applied —
       `supabase/migrations/20260924000000_security_and_payment_hardening.sql`
       (automatic via the GitHub integration; paste it once for hand-run projects)
+- [ ] The screenshot-upload fix has been applied —
+      `supabase/migrations/20260925120000_fix_screenshot_uploads.sql` (same)
 - [ ] Row Level Security is enabled on all 7 tables
-- [ ] The `result-screenshots` bucket exists (Storage → Buckets)
+- [ ] The `result-screenshots` bucket exists (Storage → Buckets) with a 5 MB
+      limit and JPG/PNG/WebP as its allowed types
 - [ ] Switch Paystack to live keys when you are ready to take real money
 
 > **Storage, honestly:** the bucket stays public-by-URL and anonymous-upload by
 > design (screenshots upload straight from the player's phone, keeping 3 MB
-> photos off the API). The upload policy limits files to images under 5 MB with
-> the exact path shape the app writes, but a determined actor could still
-> upload images into valid-looking paths. Watch Storage usage; if it ever
+> photos off the API). The bucket only takes JPG/PNG/WebP files up to 5 MB, and
+> the upload policy only the exact path shape the app writes
+> (`<tournament>/<match>/<file>`), but a determined actor could still upload
+> images into valid-looking paths. Watch Storage usage; if it ever
 > becomes a problem, move the upload server-side so only real match players can
 > write. Related: a screenshot whose result submission is rejected afterwards
 > (e.g. "already submitted") stays in the bucket unused.
@@ -570,6 +587,13 @@ NEXT_DIST_DIR=.next-build npm run build
 Supabase is not configured yet: paste `setup.sql` into the Supabase SQL editor,
 then copy `.env.example` to `.env.local` and fill in the keys, and restart the
 dev server.
+
+**Players can't upload their screenshot ("We could not upload your
+screenshot…").** Databases set up before 25 September 2026 refuse every
+upload: run `supabase/migrations/20260925120000_fix_screenshot_uploads.sql`
+once. To check a database, look at Storage → Policies → "Public can upload
+screenshots": its check must mention neither `result-screenshots/` nor
+`metadata`. The browser console shows the exact storage error.
 
 **"Groups not drawn yet"**
 Expected until you call `POST /api/admin/draw-groups` — see the admin section above.

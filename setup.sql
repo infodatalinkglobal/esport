@@ -23,7 +23,8 @@
 --   4. Row Level Security (RLS) policies: the public may READ public data and
 --      INSERT a pending registration (pending only — never 'paid'), and may
 --      never update or delete anything
---   5. A public Storage bucket for match screenshots (used from Module 2)
+--   5. A public Storage bucket for match screenshots (JPG/PNG/WebP up to
+--      5 MB; used from Module 2)
 --   6. One starter tournament row (GH₵10 entry, 8 players max)
 -- =============================================================================
 
@@ -394,24 +395,37 @@ insert into storage.buckets (id, name, public)
 values ('result-screenshots', 'result-screenshots', true)
 on conflict (id) do nothing;
 
+-- The bucket itself enforces file type and size — JPG, PNG or WebP, 5 MB max,
+-- the same limits as lib/screenshots.ts. A separate statement (not part of the
+-- insert above) so re-running this file also fixes a bucket that already exists.
+update storage.buckets
+set file_size_limit = 5242880,
+    allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp']
+where id = 'result-screenshots';
+
 -- Anyone can view a screenshot (paths are random UUIDs, so they are unguessable).
 drop policy if exists "Public can view screenshots" on storage.objects;
 create policy "Public can view screenshots"
   on storage.objects for select
   using (bucket_id = 'result-screenshots');
 
--- Anyone can upload a screenshot: images only, 5MB maximum, and the storage
--- path must have the shape the app writes — result-screenshots/<tournament
--- uuid>/<match uuid>/<name>.<jpg|jpeg|png|webp> — so the bucket cannot be
--- used as arbitrary anonymous file storage.
+-- Anyone can upload a screenshot, but only into the exact path shape the app
+-- writes (lib/screenshots.ts) — <tournament uuid>/<match uuid>/<name>.<jpg|
+-- jpeg|png|webp> — so the bucket cannot be used as arbitrary anonymous file
+-- storage. Two traps (an earlier version fell into both and refused EVERY
+-- upload, so no result could be submitted):
+--   - `name` is relative to the bucket (the bucket is `bucket_id`), so the
+--     pattern must NOT start with "result-screenshots/".
+--   - Supabase checks this policy BEFORE the file arrives, when the object's
+--     metadata has no size yet — a size check here fails every time. Type and
+--     size are enforced by the bucket settings above instead.
+-- tests/screenshot-upload.test.ts checks the app's paths against this pattern.
 drop policy if exists "Public can upload screenshots" on storage.objects;
 create policy "Public can upload screenshots"
   on storage.objects for insert
   with check (
     bucket_id = 'result-screenshots'
-    and coalesce(metadata->>'mimetype', '') like 'image/%'
-    and coalesce((metadata->>'size')::bigint, 0) between 1 and 5242880
-    and name ~* '^result-screenshots/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-z-]+\.(jpg|jpeg|png|webp)$'
+    and name ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-z-]+\.(jpg|jpeg|png|webp)$'
   );
 
 

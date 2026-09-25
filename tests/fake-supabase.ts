@@ -11,6 +11,11 @@
  * `groups (tournament_id, group_name)`, which is the draw's last line of
  * defence against duplicated groups.
  *
+ * For the payment tests (tests/verify-payment.test.ts) it also answers
+ * `rpc('mark_registration_paid', …)` with a port of that database function,
+ * and can pretend the function is missing (a database from before the
+ * hardening migration).
+ *
  * This file is a test helper, not a test: its name deliberately does not end in
  * `.test.ts`, so `npm test` never runs it on its own.
  */
@@ -54,6 +59,10 @@ export interface FakeDb {
   failInsertOn?: string | null;
   /** Ever-increasing id counter (see `makeId`). */
   nextId: number;
+  /** Every `rpc()` call, in order. */
+  rpcCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+  /** Answer `rpc()` like a database without the function (PGRST202). */
+  rpcMissing?: boolean;
 }
 
 /** Builds an empty database with a tournament and `paidCount` paid players. */
@@ -62,11 +71,14 @@ export function createFakeDb(options: {
   maxPlayers?: number;
   status?: string | null;
   tournamentId?: string;
+  /** Entry fee in pesewas (default 1000 = GH₵10). */
+  entryFee?: number;
 }): FakeDb {
   const tournamentId = options.tournamentId ?? 'tournament-1';
 
   return {
     nextId: 0,
+    rpcCalls: [],
     tables: {
       tournaments: [
         {
@@ -74,6 +86,7 @@ export function createFakeDb(options: {
           title: 'DLS Champions Cup #1',
           status: options.status ?? 'open',
           max_players: options.maxPlayers ?? 8,
+          entry_fee: options.entryFee ?? 1000,
         },
       ],
       registrations: Array.from({ length: options.paidCount }, (_, index) => ({
@@ -271,8 +284,51 @@ class FakeQuery implements PromiseLike<FakeResult> {
  * @param db The in-memory database.
  * @returns Something `ensureGroupDraw()` accepts as its `client`.
  */
+/**
+ * Port of the `mark_registration_paid()` database function (setup.sql):
+ * idempotent for a row that is already 'paid', refuses (false) when the
+ * tournament is full, otherwise marks the row 'paid' under the given
+ * reference. The real function also takes row locks; the fake runs one query
+ * at a time, so it has no races to lock against.
+ */
+function markRegistrationPaid(
+  db: FakeDb,
+  registrationId: unknown,
+  reference: unknown,
+): { data: boolean; error: null } {
+  const registration = db.tables.registrations.find((row) => row.id === registrationId);
+  if (!registration) return { data: false, error: null };
+  if (registration.payment_status === 'paid') return { data: true, error: null };
+
+  const tournament = db.tables.tournaments.find(
+    (row) => row.id === registration.tournament_id,
+  );
+  const paid = db.tables.registrations.filter(
+    (row) =>
+      row.tournament_id === registration.tournament_id && row.payment_status === 'paid',
+  ).length;
+  if (paid >= Number(tournament?.max_players ?? 0)) return { data: false, error: null };
+
+  registration.payment_status = 'paid';
+  registration.paystack_reference = reference;
+  return { data: true, error: null };
+}
+
 export function createFakeSupabase(db: FakeDb) {
   return {
+    async rpc(name: string, args: Record<string, unknown> = {}) {
+      (db.rpcCalls ??= []).push({ name, args });
+      if (db.rpcMissing || name !== 'mark_registration_paid') {
+        return {
+          data: null,
+          error: {
+            code: 'PGRST202',
+            message: `Could not find the function public.${name} in the schema cache`,
+          },
+        };
+      }
+      return markRegistrationPaid(db, args.p_registration_id, args.p_reference);
+    },
     from(table: keyof FakeTables) {
       return {
         select: (_columns?: string, options?: { count?: string; head?: boolean }) =>
@@ -291,6 +347,7 @@ export function createFakeSupabase(db: FakeDb) {
           ),
       };
     },
-    // The draw only ever uses `from()`; the cast keeps the real client's type.
+    // The draw only uses `from()`, the payment tests `rpc()` too; the cast
+    // keeps the real client's type.
   } as unknown as import('@supabase/supabase-js').SupabaseClient;
 }
